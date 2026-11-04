@@ -1821,6 +1821,158 @@ function drawMap() {
     mapCtx.fillStyle = hexAlpha(BAND_COLORS[s.band] || '#3ee6ff', alpha);
     mapCtx.fill();
   });
+
+  drawFltsatcom7();
+}
+
+/* ─── FLTSATCOM 7 (USA 20, NORAD 17181) — inclined GEO ─── */
+/* TLE epoch ~2026-10-30 (day 303.899): simplified Keplerian prop */
+const FLT7 = {
+  name: 'FLTSATCOM 7',
+  norad: 17181,
+  // epoch as JS ms UTC: 2026-01-01 + (303.89901325 - 1) days
+  epochMs: Date.UTC(2026, 0, 1) + (303.89901325 - 1) * 86400000,
+  n: 0.98930361,          // rev / day
+  e: 0.0042442,
+  i: 12.5950 * Math.PI / 180,
+  raan: 339.2344 * Math.PI / 180,
+  argp: 330.1233 * Math.PI / 180,
+  m0: 26.9284 * Math.PI / 180,
+  altKm: 36167
+};
+
+function solveE(M, e) {
+  let E = M;
+  for (let k = 0; k < 8; k++) E = M + e * Math.sin(E);
+  return E;
+}
+
+function flt7State(date = new Date()) {
+  const deg = Math.PI / 180;
+  const days = (date.getTime() - FLT7.epochMs) / 86400000;
+  const nRad = FLT7.n * 2 * Math.PI; // rad / day
+  let M = (FLT7.m0 + nRad * days) % (2 * Math.PI);
+  if (M < 0) M += 2 * Math.PI;
+  const E = solveE(M, FLT7.e);
+  const cosE = Math.cos(E), sinE = Math.sin(E);
+  const nu = Math.atan2(Math.sqrt(1 - FLT7.e * FLT7.e) * sinE, cosE - FLT7.e);
+  const r = 1; // unit orbit for direction
+  // perifocal
+  const x_p = r * Math.cos(nu);
+  const y_p = r * Math.sin(nu);
+  // to ECI
+  const cw = Math.cos(FLT7.argp), sw = Math.sin(FLT7.argp);
+  const ci = Math.cos(FLT7.i), si = Math.sin(FLT7.i);
+  const cO = Math.cos(FLT7.raan), sO = Math.sin(FLT7.raan);
+  const x1 = cw * x_p - sw * y_p;
+  const y1 = sw * x_p + cw * y_p;
+  const x2 = x1;
+  const y2 = ci * y1;
+  const z2 = si * y1;
+  const xE = cO * x2 - sO * y2;
+  const yE = sO * x2 + cO * y2;
+  const zE = z2;
+  // GMST ~ for ECEF
+  const jd = date.getTime() / 86400000 + 2440587.5;
+  const T = (jd - 2451545.0) / 36525;
+  let gmst = 280.46061837 + 360.98564736629 * (jd - 2451545.0)
+    + 0.000387933 * T * T;
+  gmst = ((gmst % 360) + 360) % 360 * deg;
+  const cg = Math.cos(gmst), sg = Math.sin(gmst);
+  const x = cg * xE + sg * yE;
+  const y = -sg * xE + cg * yE;
+  const z = zE;
+  const lon = Math.atan2(y, x) / deg;
+  const hyp = Math.sqrt(x * x + y * y);
+  const lat = Math.atan2(z, hyp) / deg;
+  return { lon, lat, nu, M };
+}
+
+function projectAlt(lon, lat, altFactor) {
+  const p = projection([lon, lat]);
+  if (!p) return null;
+  // cull back hemisphere
+  const r = projection.rotate();
+  const toRad = Math.PI / 180;
+  const lambda0 = -r[0] * toRad;
+  const phi0 = r[1] * toRad;
+  const lambda = lon * toRad - lambda0;
+  const phi = lat * toRad;
+  const cosC = Math.sin(phi0) * Math.sin(phi) + Math.cos(phi0) * Math.cos(phi) * Math.cos(lambda);
+  if (cosC < -0.02) return null;
+  const tr = projection.translate();
+  const dx = p[0] - tr[0], dy = p[1] - tr[1];
+  return [tr[0] + dx * altFactor, tr[1] + dy * altFactor, cosC];
+}
+
+function drawFltsatcom7() {
+  if (!projection) return;
+  const now = new Date();
+  const periodMs = 86400000 / FLT7.n;
+  const samples = 96;
+  const altFactor = 1.18; // visual GEO ring just outside Earth disc
+  const past = [];
+  const future = [];
+  for (let i = -samples; i <= samples; i++) {
+    const t = new Date(now.getTime() + (i / samples) * (periodMs / 2));
+    const st = flt7State(t);
+    const p = projectAlt(st.lon, st.lat, altFactor);
+    if (!p) {
+      if (i < 0) past.push(null);
+      else future.push(null);
+      continue;
+    }
+    if (i < 0) past.push(p);
+    else if (i > 0) future.push(p);
+    else {
+      past.push(p);
+      future.push(p);
+    }
+  }
+  function strokePath(pts, color, width) {
+    mapCtx.beginPath();
+    let pen = false;
+    for (const p of pts) {
+      if (!p) { pen = false; continue; }
+      if (!pen) { mapCtx.moveTo(p[0], p[1]); pen = true; }
+      else mapCtx.lineTo(p[0], p[1]);
+    }
+    mapCtx.strokeStyle = color;
+    mapCtx.lineWidth = width * devicePixelRatio;
+    mapCtx.stroke();
+  }
+  // future path (fainter)
+  strokePath(future, 'rgba(255, 120, 80, 0.28)', 1.4);
+  // past path (brighter)
+  strokePath(past, 'rgba(255, 150, 90, 0.75)', 2.0);
+
+  const cur = flt7State(now);
+  const sp = projectAlt(cur.lon, cur.lat, altFactor);
+  if (sp) {
+    // satellite body
+    mapCtx.beginPath();
+    mapCtx.arc(sp[0], sp[1], 5 * devicePixelRatio, 0, Math.PI * 2);
+    mapCtx.fillStyle = '#ff7840';
+    mapCtx.fill();
+    mapCtx.beginPath();
+    mapCtx.arc(sp[0], sp[1], 9 * devicePixelRatio, 0, Math.PI * 2);
+    mapCtx.strokeStyle = 'rgba(255, 120, 80, 0.7)';
+    mapCtx.lineWidth = 1.5 * devicePixelRatio;
+    mapCtx.stroke();
+    // solar-panel ticks
+    mapCtx.strokeStyle = 'rgba(255, 200, 140, 0.85)';
+    mapCtx.lineWidth = 1.5 * devicePixelRatio;
+    mapCtx.beginPath();
+    mapCtx.moveTo(sp[0] - 11 * devicePixelRatio, sp[1]);
+    mapCtx.lineTo(sp[0] + 11 * devicePixelRatio, sp[1]);
+    mapCtx.stroke();
+    mapCtx.font = `bold ${10 * devicePixelRatio}px JetBrains Mono, monospace`;
+    mapCtx.fillStyle = 'rgba(255, 190, 150, 0.95)';
+    mapCtx.fillText('FLTSATCOM 7', sp[0] + 12 * devicePixelRatio, sp[1] - 6 * devicePixelRatio);
+    mapCtx.font = `${9 * devicePixelRatio}px JetBrains Mono, monospace`;
+    mapCtx.fillStyle = 'rgba(255, 170, 120, 0.7)';
+    mapCtx.fillText(cur.lat.toFixed(1) + '° ' + cur.lon.toFixed(1) + '°', sp[0] + 12 * devicePixelRatio, sp[1] + 6 * devicePixelRatio);
+  }
 }
 
 function hexAlpha(hex, a) {
