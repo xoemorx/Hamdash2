@@ -95,9 +95,85 @@ html, body {
   font-size: 13px;
   color: var(--dim);
   line-height: 1.45;
+  max-width: 280px;
 }
 .weatherBlock strong { color: var(--ink); font-weight: 500; }
 .spacer { flex: 1; }
+
+/* Left weather panel — Grand Beach */
+#wxPanel {
+  position: absolute;
+  top: 100px; left: 24px;
+  width: 300px;
+  z-index: 15;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  backdrop-filter: blur(12px);
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+}
+.wxNow {
+  font-family: var(--mono);
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--cyan);
+  line-height: 1;
+}
+.wxNowSub {
+  font-size: 12px;
+  color: var(--dim);
+  margin: 4px 0 10px;
+}
+.wxMeta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  font-size: 12px;
+  color: var(--dim);
+  margin-bottom: 12px;
+  font-family: var(--mono);
+}
+.wxMeta strong { color: var(--ink); font-weight: 600; }
+.wxWear {
+  background: rgba(62, 230, 255, 0.08);
+  border: 1px solid rgba(62, 230, 255, 0.22);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--ink);
+  line-height: 1.45;
+  margin-bottom: 12px;
+}
+.wxWear .label {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--cyan);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+.wxForecast {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wxDay {
+  display: grid;
+  grid-template-columns: 36px 1fr 52px 44px;
+  gap: 6px;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  padding: 4px 0;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+.wxDay .dname { color: var(--ink); font-weight: 600; }
+.wxDay .cond { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wxDay .hi { color: var(--amber); text-align: right; }
+.wxDay .lo { color: var(--cyan); text-align: right; }
 
 /* Radar / azimuth panel */
 #radarPanel {
@@ -564,6 +640,26 @@ html, body {
 
   <button id="setupBtn" title="Setup (S)">⚙</button>
 
+  <div id="wxPanel">
+    <div class="panelTitle">Weather · Grand Beach MB</div>
+    <div class="wxNow" id="wxPanelTemp">—°</div>
+    <div class="wxNowSub" id="wxPanelCond">Loading…</div>
+    <div class="wxMeta">
+      <div>Sunrise <strong id="wxSunrise">—</strong></div>
+      <div>Sunset <strong id="wxSunset">—</strong></div>
+      <div>Moon <strong id="wxMoon">—</strong></div>
+      <div>Wind <strong id="wxWind">—</strong></div>
+      <div>Humidity <strong id="wxHum">—</strong></div>
+      <div>Feels <strong id="wxFeels">—</strong></div>
+    </div>
+    <div class="wxWear">
+      <div class="label">What to wear · Grand Beach</div>
+      <div id="wxWearText">Checking conditions…</div>
+    </div>
+    <div class="panelTitle">7-day forecast</div>
+    <div class="wxForecast" id="wxForecast"></div>
+  </div>
+
   <div id="radarPanel">
     <div class="radarLabel">Azimuth · from <span id="radarGrid">—</span></div>
     <canvas id="radarCanvas" width="560" height="560"></canvas>
@@ -685,12 +781,15 @@ html, body {
 /* ─── Station state ─── */
 const DEFAULTS = {
   call: 'N0CALL',
-  grid: 'EM28',
-  lat: 39.83,
-  lon: -98.58,
-  town: 'Lebanon KS',
-  tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  grid: 'EN10',
+  lat: 50.55,
+  lon: -96.65,
+  town: 'Grand Beach, MB',
+  tz: 'America/Winnipeg'
 };
+
+/* Grand Beach fixed coords for the dedicated weather panel */
+const GRAND_BEACH = { lat: 50.55, lon: -96.65, tz: 'America/Winnipeg', name: 'Grand Beach, MB' };
 
 let station = loadStation();
 let onAir = false;
@@ -847,26 +946,7 @@ function tickClocks() {
   }
 }
 
-/* ─── Weather (Open-Meteo) ─── */
-async function fetchWeather() {
-  try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${station.lat}&longitude=${station.lon}&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset&timezone=${encodeURIComponent(station.tz)}&temperature_unit=fahrenheit&wind_speed_unit=mph`;
-    const r = await fetch(url);
-    const d = await r.json();
-    const c = d.current;
-    const daily = d.daily;
-    const cond = weatherCode(c.weather_code);
-    document.getElementById('wxTemp').textContent = Math.round(c.temperature_2m) + '°';
-    document.getElementById('wxCond').textContent =
-      cond + ' · ' + windDir(c.wind_direction_10m) + ' ' + Math.round(c.wind_speed_10m) + ' mph';
-    const sr = daily.sunrise[0].slice(11, 16);
-    const ss = daily.sunset[0].slice(11, 16);
-    document.getElementById('wxDetail').textContent =
-      `H ${Math.round(daily.temperature_2m_max[0])}° L ${Math.round(daily.temperature_2m_min[0])}° · ☀ ${format12(sr)} ☾ ${format12(ss)}`;
-  } catch (e) {
-    document.getElementById('wxCond').textContent = 'Weather unavailable';
-  }
-}
+/* ─── Weather (Open-Meteo) — station strip + Grand Beach panel ─── */
 function weatherCode(c) {
   if (c === 0) return 'Clear';
   if (c <= 3) return 'Partly cloudy';
@@ -882,10 +962,119 @@ function windDir(deg) {
   return dirs[Math.round(deg / 22.5) % 16];
 }
 function format12(hm) {
+  if (!hm) return '—';
   let [h, m] = hm.split(':').map(Number);
   const ap = h >= 12 ? 'PM' : 'AM';
   h = h % 12 || 12;
   return h + ':' + pad(m) + ' ' + ap;
+}
+function moonPhaseName(date = new Date()) {
+  // Approximate synodic month from a known new moon (2000-01-06)
+  const knownNew = Date.UTC(2000, 0, 6, 18, 14);
+  const age = ((date.getTime() - knownNew) / 86400000) % 29.53058867;
+  const a = age < 0 ? age + 29.53058867 : age;
+  if (a < 1.85) return '🌑 New';
+  if (a < 5.54) return '🌒 Waxing crescent';
+  if (a < 9.23) return '🌓 First quarter';
+  if (a < 12.92) return '🌔 Waxing gibbous';
+  if (a < 16.61) return '🌕 Full';
+  if (a < 20.30) return '🌖 Waning gibbous';
+  if (a < 23.99) return '🌗 Last quarter';
+  if (a < 27.68) return '🌘 Waning crescent';
+  return '🌑 New';
+}
+function wearAdvice(tempC, windKmh, code, humidity) {
+  const feels = tempC - (windKmh > 15 ? Math.min(6, (windKmh - 15) * 0.15) : 0);
+  const rainy = code >= 51 && code <= 67 || code >= 80 && code <= 82;
+  const snowy = code >= 71 && code <= 77 || code >= 85 && code <= 86;
+  const parts = [];
+  if (feels <= -10) {
+    parts.push('Heavy winter coat, insulated layers, toque, gloves, scarf, and winter boots.');
+  } else if (feels <= 0) {
+    parts.push('Warm insulated jacket, sweater, long pants, closed shoes or boots, and a hat.');
+  } else if (feels <= 8) {
+    parts.push('Insulated or softshell jacket over a sweater, long pants, and closed shoes.');
+  } else if (feels <= 15) {
+    parts.push('Light jacket or fleece, long pants or jeans, and closed shoes.');
+  } else if (feels <= 22) {
+    parts.push('Long sleeves or a light sweater; pants or jeans are fine.');
+  } else {
+    parts.push('T-shirt or light shirt; shorts or light pants if you prefer.');
+  }
+  if (windKmh >= 25) parts.push('Lake wind is strong — add a windproof outer layer.');
+  else if (windKmh >= 15) parts.push('Breezy off the lake — a windbreaker helps.');
+  if (rainy) parts.push('Bring a waterproof shell; pavement and paths may be wet.');
+  if (snowy) parts.push('Expect snow underfoot — boots with grip.');
+  if (humidity >= 85 && feels <= 10) parts.push('Damp cold near the shore — layer up more than the number suggests.');
+  parts.push('Grand Beach in early November is cool and exposed; skip summer beach wear.');
+  return parts.join(' ');
+}
+async function fetchWeather() {
+  try {
+    // Top bar: station location
+    const stUrl = `https://api.open-meteo.com/v1/forecast?latitude=${station.lat}&longitude=${station.lon}&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,relative_humidity_2m,apparent_temperature&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,weather_code,precipitation_sum,wind_speed_10m_max&timezone=${encodeURIComponent(station.tz)}&temperature_unit=celsius&wind_speed_unit=kmh&forecast_days=7`;
+    const stR = await fetch(stUrl);
+    const stD = await stR.json();
+    const c = stD.current;
+    const daily = stD.daily;
+    const cond = weatherCode(c.weather_code);
+    document.getElementById('wxTemp').textContent = Math.round(c.temperature_2m) + '°C';
+    document.getElementById('wxCond').textContent =
+      cond + ' · ' + windDir(c.wind_direction_10m) + ' ' + Math.round(c.wind_speed_10m) + ' km/h';
+    const sr = (daily.sunrise[0] || '').slice(11, 16);
+    const ss = (daily.sunset[0] || '').slice(11, 16);
+    document.getElementById('wxDetail').textContent =
+      `H ${Math.round(daily.temperature_2m_max[0])}° L ${Math.round(daily.temperature_2m_min[0])}° · ☀ ${format12(sr)} ☾ ${format12(ss)} · ${moonPhaseName()}`;
+  } catch (e) {
+    document.getElementById('wxCond').textContent = 'Weather unavailable';
+  }
+
+  // Grand Beach dedicated panel
+  try {
+    const gb = GRAND_BEACH;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${gb.lat}&longitude=${gb.lon}&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,relative_humidity_2m,apparent_temperature&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,weather_code,precipitation_sum,wind_speed_10m_max&timezone=${encodeURIComponent(gb.tz)}&temperature_unit=celsius&wind_speed_unit=kmh&forecast_days=7`;
+    const r = await fetch(url);
+    const d = await r.json();
+    const cur = d.current;
+    const day = d.daily;
+    const cond = weatherCode(cur.weather_code);
+    const temp = Math.round(cur.temperature_2m);
+    const feels = Math.round(cur.apparent_temperature);
+    const wind = Math.round(cur.wind_speed_10m);
+    const hum = Math.round(cur.relative_humidity_2m);
+
+    document.getElementById('wxPanelTemp').textContent = temp + '°C';
+    document.getElementById('wxPanelCond').textContent =
+      cond + ' · feels ' + feels + '°C · ' + windDir(cur.wind_direction_10m) + ' ' + wind + ' km/h';
+    document.getElementById('wxSunrise').textContent = format12((day.sunrise[0] || '').slice(11, 16));
+    document.getElementById('wxSunset').textContent = format12((day.sunset[0] || '').slice(11, 16));
+    document.getElementById('wxMoon').textContent = moonPhaseName();
+    document.getElementById('wxWind').textContent = windDir(cur.wind_direction_10m) + ' ' + wind + ' km/h';
+    document.getElementById('wxHum').textContent = hum + '%';
+    document.getElementById('wxFeels').textContent = feels + '°C';
+    document.getElementById('wxWearText').textContent =
+      wearAdvice(cur.temperature_2m, cur.wind_speed_10m, cur.weather_code, cur.relative_humidity_2m);
+
+    const names = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    let html = '';
+    for (let i = 0; i < Math.min(7, day.time.length); i++) {
+      const dt = new Date(day.time[i] + 'T12:00:00');
+      const label = i === 0 ? 'Today' : names[dt.getDay()];
+      const hi = Math.round(day.temperature_2m_max[i]);
+      const lo = Math.round(day.temperature_2m_min[i]);
+      const wc = weatherCode(day.weather_code[i]);
+      html += `<div class="wxDay">
+        <span class="dname">${label}</span>
+        <span class="cond">${wc}</span>
+        <span class="hi">${hi}°</span>
+        <span class="lo">${lo}°</span>
+      </div>`;
+    }
+    document.getElementById('wxForecast').innerHTML = html;
+  } catch (e) {
+    document.getElementById('wxPanelCond').textContent = 'Grand Beach weather unavailable';
+    document.getElementById('wxWearText').textContent = 'Could not load conditions. Dress in layers for a cool Manitoba lakeshore.';
+  }
 }
 
 /* ─── Space weather ─── */
