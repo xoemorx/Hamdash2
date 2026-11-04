@@ -368,7 +368,20 @@ html, body {
 }
 .card.rig { width: 170px; flex-shrink: 0; }
 .card.space { width: 200px; flex-shrink: 0; }
-.card.passes { width: 190px; flex-shrink: 0; }
+.card.passes { width: 280px; flex-shrink: 0; }
+.satRow {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  padding: 6px 0;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  line-height: 1.35;
+}
+.satRow:first-child { border-top: none; padding-top: 2px; }
+.satRow .satName { color: var(--ink); font-weight: 700; font-size: 12px; }
+.satRow .satMeta { color: var(--faint); }
+.satRow .satVal { color: var(--cyan); }
+.satRow .satAOS { color: var(--amber); }
 .card.bands { flex: 1; min-width: 260px; }
 .bandTiles {
   display: flex; flex-wrap: wrap; gap: 5px;
@@ -841,9 +854,9 @@ html, body {
       <div style="font-size:11px;color:var(--faint);margin-top:8px;" id="spaceNote">—</div>
     </div>
     <div class="card passes">
-      <div class="label">Next passes</div>
+      <div class="label">Satellites · vs station</div>
       <div id="passList">
-        <div class="passLine">Loading satellites…</div>
+        <div class="passLine">Loading ISS · SO-50 · FLT7…</div>
       </div>
     </div>
     <div class="card bands">
@@ -1043,6 +1056,7 @@ document.getElementById('saveBtn').addEventListener('click', () => {
   showToast('Station saved · ' + station.call);
   fetchWeather();
   fetchBandConditions();
+  updateSatPanel();
 });
 
 document.getElementById('setupBtn').addEventListener('click', openSetup);
@@ -1078,6 +1092,7 @@ function applyStation() {
   document.getElementById('radarGrid').textContent = station.grid;
   document.getElementById('tzLabel').textContent = station.tz.split('/').pop().replace(/_/g, ' ');
   document.title = station.call + ' Mission Control';
+  if (typeof updateSatPanel === 'function') updateSatPanel();
 }
 
 /* ─── Clocks ─── */
@@ -1634,14 +1649,7 @@ const SATS = [
   { name: 'RS-44', period: 116 }
 ];
 function updatePasses() {
-  const list = document.getElementById('passList');
-  const now = Date.now();
-  const lines = SATS.slice(0, 3).map((s, i) => {
-    const mins = 12 + i * 37 + Math.floor(Math.random() * 20);
-    const elev = 18 + Math.floor(Math.random() * 50);
-    return `<div class="passLine"><strong>${s.name}</strong> in ${mins}m · max ${elev}°</div>`;
-  });
-  list.innerHTML = lines.join('');
+  updateSatPanel();
 }
 
 /* ─── Map (orthographic globe with D3) ─── */
@@ -1822,82 +1830,152 @@ function drawMap() {
     mapCtx.fill();
   });
 
-  drawFltsatcom7();
+  drawTrackedSats();
 }
 
-/* ─── FLTSATCOM 7 (USA 20, NORAD 17181) — inclined GEO ─── */
-/* TLE epoch ~2026-10-30 (day 303.899): simplified Keplerian prop */
-const FLT7 = {
-  name: 'FLTSATCOM 7',
-  norad: 17181,
-  // epoch as JS ms UTC: 2026-01-01 + (303.89901325 - 1) days
-  epochMs: Date.UTC(2026, 0, 1) + (303.89901325 - 1) * 86400000,
-  n: 0.98930361,          // rev / day
-  e: 0.0042442,
-  i: 12.5950 * Math.PI / 180,
-  raan: 339.2344 * Math.PI / 180,
-  argp: 330.1233 * Math.PI / 180,
-  m0: 26.9284 * Math.PI / 180,
-  altKm: 36167
-};
+/* ─── Tracked satellites (simplified Keplerian from public TLEs) ─── */
+const RE_KM = 6378.137;
+const DEG = Math.PI / 180;
+
+function dayOfYearToMs(year, dayFrac) {
+  return Date.UTC(year, 0, 1) + (dayFrac - 1) * 86400000;
+}
+
+const TRACKED_SATS = [
+  {
+    id: 'iss',
+    name: 'ISS',
+    full: 'ISS (ZARYA)',
+    norad: 25544,
+    color: '#5ec8ff',
+    colorFaint: 'rgba(94, 200, 255, 0.28)',
+    colorPast: 'rgba(94, 200, 255, 0.8)',
+    epochMs: dayOfYearToMs(2026, 306.75682168),
+    n: 15.49154261,
+    e: 0.0007124,
+    i: 51.6331 * DEG,
+    raan: 334.3796 * DEG,
+    argp: 340.7366 * DEG,
+    m0: 19.3352 * DEG,
+    altVisual: 1.06,
+    minElev: 10
+  },
+  {
+    id: 'so50',
+    name: 'SO-50',
+    full: 'SO-50 (SAUDISAT 1C)',
+    norad: 27607,
+    color: '#c4f542',
+    colorFaint: 'rgba(196, 245, 66, 0.28)',
+    colorPast: 'rgba(196, 245, 66, 0.8)',
+    epochMs: dayOfYearToMs(2026, 306.51463742),
+    n: 14.83299987,
+    e: 0.0068859,
+    i: 64.5530 * DEG,
+    raan: 60.9210 * DEG,
+    argp: 236.8822 * DEG,
+    m0: 122.5664 * DEG,
+    altVisual: 1.08,
+    minElev: 10
+  },
+  {
+    id: 'flt7',
+    name: 'FLTSATCOM 7',
+    full: 'FLTSATCOM 7 (USA 20)',
+    norad: 17181,
+    color: '#ff7840',
+    colorFaint: 'rgba(255, 120, 80, 0.28)',
+    colorPast: 'rgba(255, 150, 90, 0.75)',
+    epochMs: dayOfYearToMs(2026, 303.89901325),
+    n: 0.98930361,
+    e: 0.0042442,
+    i: 12.5950 * DEG,
+    raan: 339.2344 * DEG,
+    argp: 330.1233 * DEG,
+    m0: 26.9284 * DEG,
+    altVisual: 1.18,
+    minElev: 5
+  }
+];
 
 function solveE(M, e) {
   let E = M;
-  for (let k = 0; k < 8; k++) E = M + e * Math.sin(E);
+  for (let k = 0; k < 10; k++) E = M + e * Math.sin(E);
   return E;
 }
 
-function flt7State(date = new Date()) {
-  const deg = Math.PI / 180;
-  const days = (date.getTime() - FLT7.epochMs) / 86400000;
-  const nRad = FLT7.n * 2 * Math.PI; // rad / day
-  let M = (FLT7.m0 + nRad * days) % (2 * Math.PI);
+function satState(sat, date = new Date()) {
+  const days = (date.getTime() - sat.epochMs) / 86400000;
+  const nRad = sat.n * 2 * Math.PI;
+  let M = (sat.m0 + nRad * days) % (2 * Math.PI);
   if (M < 0) M += 2 * Math.PI;
-  const E = solveE(M, FLT7.e);
+  const E = solveE(M, sat.e);
   const cosE = Math.cos(E), sinE = Math.sin(E);
-  const nu = Math.atan2(Math.sqrt(1 - FLT7.e * FLT7.e) * sinE, cosE - FLT7.e);
-  const r = 1; // unit orbit for direction
-  // perifocal
+  const nu = Math.atan2(Math.sqrt(1 - sat.e * sat.e) * sinE, cosE - sat.e);
+  // semi-major axis from mean motion (Kepler)
+  const mu = 398600.4418; // km^3/s^2
+  const nRadS = sat.n * 2 * Math.PI / 86400;
+  const a = Math.pow(mu / (nRadS * nRadS), 1 / 3);
+  const r = a * (1 - sat.e * cosE);
   const x_p = r * Math.cos(nu);
   const y_p = r * Math.sin(nu);
-  // to ECI
-  const cw = Math.cos(FLT7.argp), sw = Math.sin(FLT7.argp);
-  const ci = Math.cos(FLT7.i), si = Math.sin(FLT7.i);
-  const cO = Math.cos(FLT7.raan), sO = Math.sin(FLT7.raan);
+  const cw = Math.cos(sat.argp), sw = Math.sin(sat.argp);
+  const ci = Math.cos(sat.i), si = Math.sin(sat.i);
+  const cO = Math.cos(sat.raan), sO = Math.sin(sat.raan);
   const x1 = cw * x_p - sw * y_p;
   const y1 = sw * x_p + cw * y_p;
-  const x2 = x1;
-  const y2 = ci * y1;
-  const z2 = si * y1;
-  const xE = cO * x2 - sO * y2;
-  const yE = sO * x2 + cO * y2;
-  const zE = z2;
-  // GMST ~ for ECEF
+  const xEci = cO * x1 - sO * ci * y1;
+  const yEci = sO * x1 + cO * ci * y1;
+  const zEci = si * y1;
   const jd = date.getTime() / 86400000 + 2440587.5;
   const T = (jd - 2451545.0) / 36525;
-  let gmst = 280.46061837 + 360.98564736629 * (jd - 2451545.0)
-    + 0.000387933 * T * T;
-  gmst = ((gmst % 360) + 360) % 360 * deg;
+  let gmst = 280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * T * T;
+  gmst = ((gmst % 360) + 360) % 360 * DEG;
   const cg = Math.cos(gmst), sg = Math.sin(gmst);
-  const x = cg * xE + sg * yE;
-  const y = -sg * xE + cg * yE;
-  const z = zE;
-  const lon = Math.atan2(y, x) / deg;
+  const x = cg * xEci + sg * yEci;
+  const y = -sg * xEci + cg * yEci;
+  const z = zEci;
+  const lon = Math.atan2(y, x) / DEG;
   const hyp = Math.sqrt(x * x + y * y);
-  const lat = Math.atan2(z, hyp) / deg;
-  return { lon, lat, nu, M };
+  const lat = Math.atan2(z, hyp) / DEG;
+  const altKm = Math.sqrt(x * x + y * y + z * z) - RE_KM;
+  return { lon, lat, altKm, x, y, z, r };
+}
+
+function observerEcef(latDeg, lonDeg, altKm = 0) {
+  const lat = latDeg * DEG, lon = lonDeg * DEG;
+  const cl = Math.cos(lat), sl = Math.sin(lat);
+  const co = Math.cos(lon), so = Math.sin(lon);
+  const N = RE_KM; // spherical approx
+  const x = (N + altKm) * cl * co;
+  const y = (N + altKm) * cl * so;
+  const z = (N + altKm) * sl;
+  return { x, y, z, lat, lon, cl, sl, co, so };
+}
+
+function lookAngles(satPos, obs) {
+  const dx = satPos.x - obs.x;
+  const dy = satPos.y - obs.y;
+  const dz = satPos.z - obs.z;
+  const range = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  // topocentric ENU
+  const e = -obs.so * dx + obs.co * dy;
+  const n = -obs.sl * obs.co * dx - obs.sl * obs.so * dy + obs.cl * dz;
+  const u = obs.cl * obs.co * dx + obs.cl * obs.so * dy + obs.sl * dz;
+  const elev = Math.asin(u / range) / DEG;
+  let az = Math.atan2(e, n) / DEG;
+  if (az < 0) az += 360;
+  return { elev, az, rangeKm: range };
 }
 
 function projectAlt(lon, lat, altFactor) {
   const p = projection([lon, lat]);
   if (!p) return null;
-  // cull back hemisphere
   const r = projection.rotate();
-  const toRad = Math.PI / 180;
-  const lambda0 = -r[0] * toRad;
-  const phi0 = r[1] * toRad;
-  const lambda = lon * toRad - lambda0;
-  const phi = lat * toRad;
+  const lambda0 = -r[0] * DEG;
+  const phi0 = r[1] * DEG;
+  const lambda = lon * DEG - lambda0;
+  const phi = lat * DEG;
   const cosC = Math.sin(phi0) * Math.sin(phi) + Math.cos(phi0) * Math.cos(phi) * Math.cos(lambda);
   if (cosC < -0.02) return null;
   const tr = projection.translate();
@@ -1905,74 +1983,136 @@ function projectAlt(lon, lat, altFactor) {
   return [tr[0] + dx * altFactor, tr[1] + dy * altFactor, cosC];
 }
 
-function drawFltsatcom7() {
+function nextPass(sat, fromDate, horizonHours = 36) {
+  const obs = observerEcef(station.lat, station.lon);
+  const stepMs = 30 * 1000;
+  const end = fromDate.getTime() + horizonHours * 3600000;
+  let prevElev = -90;
+  let aos = null;
+  let maxEl = -90;
+  let maxT = null;
+  let inPass = false;
+  for (let t = fromDate.getTime(); t <= end; t += stepMs) {
+    const st = satState(sat, new Date(t));
+    const la = lookAngles(st, obs);
+    if (!inPass && prevElev < sat.minElev && la.elev >= sat.minElev) {
+      inPass = true;
+      aos = new Date(t);
+      maxEl = la.elev;
+      maxT = new Date(t);
+    }
+    if (inPass) {
+      if (la.elev > maxEl) { maxEl = la.elev; maxT = new Date(t); }
+      if (la.elev < sat.minElev) {
+        return { aos, maxEl, maxT, los: new Date(t) };
+      }
+    }
+    prevElev = la.elev;
+  }
+  if (inPass && aos) return { aos, maxEl, maxT, los: null };
+  return null;
+}
+
+function drawTrackedSats() {
   if (!projection) return;
   const now = new Date();
-  const periodMs = 86400000 / FLT7.n;
-  const samples = 96;
-  const altFactor = 1.18; // visual GEO ring just outside Earth disc
-  const past = [];
-  const future = [];
-  for (let i = -samples; i <= samples; i++) {
-    const t = new Date(now.getTime() + (i / samples) * (periodMs / 2));
-    const st = flt7State(t);
-    const p = projectAlt(st.lon, st.lat, altFactor);
-    if (!p) {
-      if (i < 0) past.push(null);
-      else future.push(null);
-      continue;
+  TRACKED_SATS.forEach(sat => {
+    const periodMs = 86400000 / sat.n;
+    const samples = sat.n < 2 ? 96 : 72;
+    const half = sat.n < 2 ? periodMs / 2 : periodMs * 0.45;
+    const past = [], future = [];
+    for (let i = -samples; i <= samples; i++) {
+      const t = new Date(now.getTime() + (i / samples) * half);
+      const st = satState(sat, t);
+      const p = projectAlt(st.lon, st.lat, sat.altVisual);
+      if (!p) {
+        if (i < 0) past.push(null); else future.push(null);
+        continue;
+      }
+      if (i < 0) past.push(p);
+      else if (i > 0) future.push(p);
+      else { past.push(p); future.push(p); }
     }
-    if (i < 0) past.push(p);
-    else if (i > 0) future.push(p);
-    else {
-      past.push(p);
-      future.push(p);
-    }
-  }
-  function strokePath(pts, color, width) {
-    mapCtx.beginPath();
-    let pen = false;
-    for (const p of pts) {
-      if (!p) { pen = false; continue; }
-      if (!pen) { mapCtx.moveTo(p[0], p[1]); pen = true; }
-      else mapCtx.lineTo(p[0], p[1]);
-    }
-    mapCtx.strokeStyle = color;
-    mapCtx.lineWidth = width * devicePixelRatio;
-    mapCtx.stroke();
-  }
-  // future path (fainter)
-  strokePath(future, 'rgba(255, 120, 80, 0.28)', 1.4);
-  // past path (brighter)
-  strokePath(past, 'rgba(255, 150, 90, 0.75)', 2.0);
+    const strokePath = (pts, color, width) => {
+      mapCtx.beginPath();
+      let pen = false;
+      for (const p of pts) {
+        if (!p) { pen = false; continue; }
+        if (!pen) { mapCtx.moveTo(p[0], p[1]); pen = true; }
+        else mapCtx.lineTo(p[0], p[1]);
+      }
+      mapCtx.strokeStyle = color;
+      mapCtx.lineWidth = width * devicePixelRatio;
+      mapCtx.stroke();
+    };
+    strokePath(future, sat.colorFaint, 1.3);
+    strokePath(past, sat.colorPast, 1.9);
 
-  const cur = flt7State(now);
-  const sp = projectAlt(cur.lon, cur.lat, altFactor);
-  if (sp) {
-    // satellite body
+    const cur = satState(sat, now);
+    const sp = projectAlt(cur.lon, cur.lat, sat.altVisual);
+    if (!sp) return;
     mapCtx.beginPath();
-    mapCtx.arc(sp[0], sp[1], 5 * devicePixelRatio, 0, Math.PI * 2);
-    mapCtx.fillStyle = '#ff7840';
+    mapCtx.arc(sp[0], sp[1], 4.5 * devicePixelRatio, 0, Math.PI * 2);
+    mapCtx.fillStyle = sat.color;
     mapCtx.fill();
     mapCtx.beginPath();
-    mapCtx.arc(sp[0], sp[1], 9 * devicePixelRatio, 0, Math.PI * 2);
-    mapCtx.strokeStyle = 'rgba(255, 120, 80, 0.7)';
-    mapCtx.lineWidth = 1.5 * devicePixelRatio;
+    mapCtx.arc(sp[0], sp[1], 8 * devicePixelRatio, 0, Math.PI * 2);
+    mapCtx.strokeStyle = sat.color;
+    mapCtx.globalAlpha = 0.55;
+    mapCtx.lineWidth = 1.4 * devicePixelRatio;
     mapCtx.stroke();
-    // solar-panel ticks
-    mapCtx.strokeStyle = 'rgba(255, 200, 140, 0.85)';
-    mapCtx.lineWidth = 1.5 * devicePixelRatio;
-    mapCtx.beginPath();
-    mapCtx.moveTo(sp[0] - 11 * devicePixelRatio, sp[1]);
-    mapCtx.lineTo(sp[0] + 11 * devicePixelRatio, sp[1]);
-    mapCtx.stroke();
+    mapCtx.globalAlpha = 1;
     mapCtx.font = `bold ${10 * devicePixelRatio}px JetBrains Mono, monospace`;
-    mapCtx.fillStyle = 'rgba(255, 190, 150, 0.95)';
-    mapCtx.fillText('FLTSATCOM 7', sp[0] + 12 * devicePixelRatio, sp[1] - 6 * devicePixelRatio);
-    mapCtx.font = `${9 * devicePixelRatio}px JetBrains Mono, monospace`;
-    mapCtx.fillStyle = 'rgba(255, 170, 120, 0.7)';
-    mapCtx.fillText(cur.lat.toFixed(1) + '° ' + cur.lon.toFixed(1) + '°', sp[0] + 12 * devicePixelRatio, sp[1] + 6 * devicePixelRatio);
+    mapCtx.fillStyle = sat.color;
+    mapCtx.fillText(sat.name, sp[0] + 10 * devicePixelRatio, sp[1] - 5 * devicePixelRatio);
+  });
+}
+
+function formatPassLocal(d) {
+  if (!d) return '—';
+  try {
+    return d.toLocaleString(undefined, {
+      timeZone: station.tz || undefined,
+      weekday: 'short', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+  } catch (e) {
+    return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
   }
+}
+
+function updateSatPanel() {
+  const el = document.getElementById('passList');
+  if (!el || !station) return;
+  const now = new Date();
+  const obs = observerEcef(station.lat, station.lon);
+  let html = '';
+  TRACKED_SATS.forEach(sat => {
+    const st = satState(sat, now);
+    const la = lookAngles(st, obs);
+    const elevStr = la.elev.toFixed(1) + '°';
+    const rangeStr = Math.round(la.rangeKm).toLocaleString() + ' km';
+    const azStr = Math.round(la.az) + '°';
+    let passStr;
+    if (la.elev >= sat.minElev) {
+      passStr = '<span class="satAOS">IN PASS now · max elev live</span>';
+    } else {
+      const np = nextPass(sat, now, sat.n < 2 ? 72 : 24);
+      if (np && np.aos) {
+        passStr = '<span class="satAOS">AOS ' + formatPassLocal(np.aos) + '</span>' +
+          '<br><span class="satMeta">max ' + np.maxEl.toFixed(0) + '° · ' + formatPassLocal(np.maxT) + '</span>';
+      } else {
+        passStr = '<span class="satMeta">no pass in search window</span>';
+      }
+    }
+    html += `<div class="satRow">
+      <div class="satName" style="color:${sat.color}">${sat.name}</div>
+      <div>El <span class="satVal">${elevStr}</span> · Az <span class="satVal">${azStr}</span> · <span class="satVal">${rangeStr}</span></div>
+      <div class="satMeta">${st.lat.toFixed(1)}°, ${st.lon.toFixed(1)}° · alt ${Math.round(st.altKm)} km</div>
+      <div>${passStr}</div>
+    </div>`;
+  });
+  el.innerHTML = html;
 }
 
 function hexAlpha(hex, a) {
@@ -2110,7 +2250,7 @@ function boot() {
   tickSpots();
 
   updatePasses();
-  setInterval(updatePasses, 60 * 1000);
+  setInterval(updatePasses, 10 * 1000);
 
   initMap();
   window.addEventListener('resize', () => {
