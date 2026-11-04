@@ -323,6 +323,32 @@ html, body {
 .bandDot {
   width: 8px; height: 8px; border-radius: 2px;
 }
+.ramNote {
+  font-size: 10px;
+  color: var(--faint);
+  margin-bottom: 6px;
+}
+.ramList {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.ramRow {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  gap: 6px;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  padding: 3px 0;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+.ramRow .call { color: var(--phos); font-weight: 700; }
+.ramRow .freq { color: var(--cyan); }
+.ramRow .loc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Bottom panels */
 #bottomRow {
@@ -781,6 +807,10 @@ html, body {
     </div>
     <div class="bandBar" id="bandBar"></div>
     <div class="bandLegend" id="bandLegend"></div>
+
+    <div class="panelTitle" style="margin-top:14px;">MB Repeaters · RAM</div>
+    <div class="ramNote">Green markers on globe · data from ramb.ca</div>
+    <div class="ramList" id="ramList"></div>
   </div>
 
   <div id="bottomRow">
@@ -901,6 +931,23 @@ const BAND_COLORS = {
   20: '#2ecc71', 17: '#1abc9c', 15: '#3498db', 12: '#9b59b6',
   10: '#e91e63', 6: '#00bcd4'
 };
+
+/* RAM (Radio Amateurs of Manitoba) network — from https://ramb.ca/repeaters/ */
+const RAM_REPEATERS = [
+  { call: 'VE4WPG', loc: 'Winnipeg · Richardson', freq: '147.390+', tone: '127.3/88.5', lat: 49.8959, lon: -97.1378, hub: 'WPG' },
+  { call: 'VE4ACX', loc: 'Winnipeg · Richardson', freq: '443.500+', tone: '127.3/88.5', lat: 49.8962, lon: -97.1375, hub: 'WPG' },
+  { call: 'VE4WRS', loc: 'Winnipeg · Osborne', freq: '145.450-', tone: '127.3', lat: 49.8745, lon: -97.1395, hub: 'Canada' },
+  { call: 'VE4CNR', loc: 'Winnipeg · Dugald Rd', freq: '146.760-', tone: '127.3/88.5', lat: 49.8865, lon: -97.0517, hub: 'WPG' },
+  { call: 'VA4STC', loc: 'Winnipeg · Country Club', freq: '147.090+', tone: '127.3', lat: 49.8792, lon: -97.2822, hub: 'WPG' },
+  { call: 'VE4MAN', loc: 'Starbuck', freq: '146.610-', tone: '127.3', lat: 49.8360, lon: -97.5128, hub: 'MB' },
+  { call: 'VE4CDN', loc: 'Morris', freq: '145.270-', tone: '127.3', lat: 49.3413, lon: -97.3742, hub: 'MB' },
+  { call: 'VE4GIM', loc: 'Gimli', freq: '146.850-', tone: '127.3/88.5', lat: 50.6540, lon: -97.0019, hub: 'MB' },
+  { call: 'VE4SEL', loc: 'Selkirk', freq: '147.060+', tone: '127.3', lat: 50.1436, lon: -96.8845, hub: 'MB' },
+  { call: 'VE4MIL', loc: 'Milner Ridge', freq: '145.210-', tone: '127.3', lat: 50.1493, lon: -96.2226, hub: 'MB' },
+  { call: 'VE4EMB', loc: 'Hadashville', freq: '147.360+', tone: '127.3', lat: 49.6565, lon: -95.9044, hub: 'MB' },
+  { call: 'VE4FAL', loc: 'Falcon Lake', freq: '146.640-', tone: '127.3', lat: 49.6950, lon: -95.3200, hub: 'MB' },
+  { call: 'VE4PLP', loc: 'Portage la Prairie', freq: '147.165+', tone: '127.3', lat: 49.9728, lon: -98.2919, hub: 'MB' }
+];
 
 /* ─── Grid ↔ lat/lon ─── */
 function gridToLatLon(grid) {
@@ -1542,6 +1589,18 @@ function tickSpots() {
   renderBandBar();
 }
 
+function renderRamList() {
+  const el = document.getElementById('ramList');
+  if (!el) return;
+  el.innerHTML = RAM_REPEATERS.map(r =>
+    `<div class="ramRow" title="${r.tone} Hz · ${r.hub} hub">
+      <span class="call">${r.call}</span>
+      <span class="loc">${r.loc}</span>
+      <span class="freq">${r.freq}</span>
+    </div>`
+  ).join('');
+}
+
 function renderBandBar() {
   const bar = document.getElementById('bandBar');
   const leg = document.getElementById('bandLegend');
@@ -1688,6 +1747,59 @@ function drawMap() {
     mapCtx.stroke();
   }
 
+  // RAM Manitoba repeaters (front-hemisphere only)
+  const r = projection.rotate();
+  const toRad = Math.PI / 180;
+  const lambda0 = -r[0] * toRad;
+  const phi0 = r[1] * toRad;
+  const cosPhi0 = Math.cos(phi0);
+  const sinPhi0 = Math.sin(phi0);
+  function isFront(lon, lat) {
+    const lambda = lon * toRad - lambda0;
+    const phi = lat * toRad;
+    const cosC = sinPhi0 * Math.sin(phi) + cosPhi0 * Math.cos(phi) * Math.cos(lambda);
+    return cosC > 0.05;
+  }
+  // soft links between nearby RAM sites
+  mapCtx.lineWidth = 1 * devicePixelRatio;
+  for (let i = 0; i < RAM_REPEATERS.length; i++) {
+    for (let j = i + 1; j < RAM_REPEATERS.length; j++) {
+      const a = RAM_REPEATERS[i], b = RAM_REPEATERS[j];
+      const dlat = a.lat - b.lat, dlon = a.lon - b.lon;
+      if (dlat * dlat + dlon * dlon > 1.6) continue; // ~ only local links
+      if (!isFront(a.lon, a.lat) || !isFront(b.lon, b.lat)) continue;
+      const pa = projection([a.lon, a.lat]);
+      const pb = projection([b.lon, b.lat]);
+      if (!pa || !pb) continue;
+      mapCtx.beginPath();
+      mapCtx.moveTo(pa[0], pa[1]);
+      mapCtx.lineTo(pb[0], pb[1]);
+      mapCtx.strokeStyle = 'rgba(196, 245, 66, 0.18)';
+      mapCtx.stroke();
+    }
+  }
+  RAM_REPEATERS.forEach(rep => {
+    if (!isFront(rep.lon, rep.lat)) return;
+    const p = projection([rep.lon, rep.lat]);
+    if (!p) return;
+    const uhf = rep.freq.startsWith('4');
+    mapCtx.beginPath();
+    mapCtx.arc(p[0], p[1], (uhf ? 3.5 : 4.5) * devicePixelRatio, 0, Math.PI * 2);
+    mapCtx.fillStyle = uhf ? '#c4f542' : '#3dff9e';
+    mapCtx.fill();
+    mapCtx.beginPath();
+    mapCtx.arc(p[0], p[1], 8 * devicePixelRatio, 0, Math.PI * 2);
+    mapCtx.strokeStyle = uhf ? 'rgba(196,245,66,0.45)' : 'rgba(61,255,158,0.4)';
+    mapCtx.lineWidth = 1.2 * devicePixelRatio;
+    mapCtx.stroke();
+    // callsign label when globe is somewhat face-on to Manitoba
+    if (isFront(rep.lon, rep.lat)) {
+      mapCtx.font = `${10 * devicePixelRatio}px JetBrains Mono, monospace`;
+      mapCtx.fillStyle = 'rgba(200, 255, 220, 0.9)';
+      mapCtx.fillText(rep.call, p[0] + 7 * devicePixelRatio, p[1] - 4 * devicePixelRatio);
+    }
+  });
+
   // signal arcs / spots
   spots.forEach(s => {
     const p = projection([s.lon, s.lat]);
@@ -1832,6 +1944,7 @@ function boot() {
 
   seedDx();
   setInterval(pushDxSpot, 8000);
+  renderRamList();
 
   for (let i = 0; i < 12; i++) {
     const s = randomSpot();
