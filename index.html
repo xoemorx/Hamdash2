@@ -1,0 +1,1573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ham Mission Control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<style>
+:root {
+  --ink: #f0f4f8;
+  --dim: #8a96a3;
+  --faint: #4a5560;
+  --amber: #ffb627;
+  --amber-glow: rgba(255, 182, 39, 0.45);
+  --cyan: #3ee6ff;
+  --cyan-dim: rgba(62, 230, 255, 0.15);
+  --lime: #c4f542;
+  --phos: #3dff9e;
+  --bad: #ff5a5a;
+  --good: #4ade80;
+  --line: rgba(120, 200, 255, 0.14);
+  --glass: rgba(4, 10, 18, 0.72);
+  --panel: rgba(6, 14, 24, 0.85);
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --sans: 'Space Grotesk', system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  width: 100%; height: 100%;
+  background: #000;
+  color: var(--ink);
+  overflow: hidden;
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+#stage {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 30% 50%, #071525 0%, #02060c 50%, #000 100%);
+  overflow: hidden;
+}
+#mapCanvas {
+  position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+  opacity: 0.92;
+}
+/* Top bar */
+#topBar {
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 88px;
+  display: flex; align-items: center; gap: 28px;
+  padding: 0 28px;
+  background: linear-gradient(180deg, rgba(0,0,0,0.75) 0%, transparent 100%);
+  z-index: 20;
+  pointer-events: none;
+}
+#topBar > * { pointer-events: auto; }
+.callsignBlock { min-width: 160px; }
+.callsign {
+  font-family: var(--mono);
+  font-weight: 800;
+  font-size: 32px;
+  letter-spacing: 0.04em;
+  color: var(--amber);
+  text-shadow: 0 0 24px var(--amber-glow);
+  line-height: 1.1;
+}
+.subCall {
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+.clockBlock { text-align: center; }
+.clockTime {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 36px;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+.clockTime.utc { color: var(--amber); }
+.clockTime.local { color: var(--ink); }
+.clockLabel {
+  font-size: 10px;
+  color: var(--dim);
+  letter-spacing: 0.18em;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+.weatherBlock {
+  font-size: 13px;
+  color: var(--dim);
+  line-height: 1.45;
+}
+.weatherBlock strong { color: var(--ink); font-weight: 500; }
+.spacer { flex: 1; }
+
+/* Radar / azimuth panel */
+#radarPanel {
+  position: absolute;
+  top: 100px; right: 24px;
+  width: 280px; height: 280px;
+  z-index: 15;
+}
+#radarCanvas {
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(8, 30, 50, 0.9) 0%, rgba(2, 8, 16, 0.95) 100%);
+  box-shadow: 0 0 0 1px var(--line), 0 0 40px rgba(0, 80, 120, 0.25);
+}
+.radarLabel {
+  position: absolute; top: -22px; left: 0; right: 0;
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+/* Right activity panel */
+#activityPanel {
+  position: absolute;
+  top: 400px; right: 24px;
+  width: 300px;
+  z-index: 15;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  backdrop-filter: blur(12px);
+  max-height: calc(100vh - 460px);
+  overflow-y: auto;
+}
+.panelTitle {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--cyan);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+.onAirCount {
+  font-family: var(--mono);
+  font-size: 42px;
+  font-weight: 800;
+  color: var(--phos);
+  line-height: 1;
+  text-shadow: 0 0 20px rgba(61, 255, 158, 0.4);
+}
+.onAirSub {
+  font-size: 12px;
+  color: var(--dim);
+  margin-top: 4px;
+  margin-bottom: 12px;
+}
+/* SkipDX block */
+.skipBlock {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 182, 39, 0.22);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+.skipHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.skipTitle {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--amber);
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.skipBest {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+.skipBest strong {
+  color: var(--amber);
+  font-weight: 700;
+}
+.skipFarthest {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1.15;
+}
+.skipFarthest .km {
+  color: var(--phos);
+}
+.skipMeta {
+  font-size: 11px;
+  color: var(--dim);
+  margin-top: 3px;
+  font-family: var(--mono);
+}
+.skipList {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.skipRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  padding: 3px 0;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+.skipRow .call { color: var(--cyan); font-weight: 600; }
+.skipRow .dist { color: var(--phos); }
+.skipRow.newBest {
+  animation: flashBest 1.2s ease;
+}
+@keyframes flashBest {
+  0%, 100% { background: transparent; }
+  30% { background: rgba(255, 182, 39, 0.18); }
+}
+.bandBar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.04);
+  margin-bottom: 8px;
+}
+.bandSeg { height: 100%; }
+.bandLegend {
+  display: flex; flex-wrap: wrap; gap: 6px 10px;
+  font-size: 10px;
+  color: var(--faint);
+  font-family: var(--mono);
+}
+.bandLegend span { display: flex; align-items: center; gap: 4px; }
+.bandDot {
+  width: 8px; height: 8px; border-radius: 2px;
+}
+
+/* Bottom panels */
+#bottomRow {
+  position: absolute;
+  bottom: 56px; left: 24px; right: 320px;
+  display: flex; gap: 16px;
+  z-index: 15;
+  align-items: stretch;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 16px;
+  backdrop-filter: blur(12px);
+  min-width: 0;
+}
+.card.rig { width: 170px; flex-shrink: 0; }
+.card.space { width: 200px; flex-shrink: 0; }
+.card.passes { width: 190px; flex-shrink: 0; }
+.card.bands { flex: 1; min-width: 260px; }
+.bandTiles {
+  display: flex; flex-wrap: wrap; gap: 5px;
+  margin-top: 4px;
+}
+.bandTile {
+  flex: 1 1 48px;
+  min-width: 48px;
+  text-align: center;
+  padding: 5px 3px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid transparent;
+  font-family: var(--mono);
+}
+.bandTile .bn { font-size: 11px; font-weight: 700; color: var(--ink); }
+.bandTile .bc { font-size: 9px; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.03em; }
+.bandTile.good { border-color: rgba(74, 222, 128, 0.45); background: rgba(74, 222, 128, 0.12); }
+.bandTile.good .bc { color: var(--good); }
+.bandTile.fair { border-color: rgba(255, 182, 39, 0.4); background: rgba(255, 182, 39, 0.1); }
+.bandTile.fair .bc { color: var(--amber); }
+.bandTile.poor { border-color: rgba(255, 90, 90, 0.35); background: rgba(255, 90, 90, 0.08); }
+.bandTile.poor .bc { color: var(--bad); }
+.bandTile.unknown .bc { color: var(--faint); }
+.mufRow {
+  display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+.mufRow strong { color: var(--cyan); font-size: 15px; font-weight: 700; }
+.card .label {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--dim);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.rigStatus {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 8px;
+}
+.rigDot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--faint);
+  box-shadow: 0 0 0 3px rgba(90,90,90,0.3);
+}
+.rigDot.on { background: var(--bad); box-shadow: 0 0 12px var(--bad); animation: pulse 1.2s infinite; }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.rigBtn {
+  font-size: 11px;
+  font-family: var(--mono);
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+}
+.rigBtn.active {
+  border-color: var(--bad);
+  color: var(--bad);
+  background: rgba(255, 90, 90, 0.12);
+}
+.spaceGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+.spaceItem .val {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.1;
+}
+.spaceItem .val.ok { color: var(--good); }
+.spaceItem .val.warn { color: var(--amber); }
+.spaceItem .val.bad { color: var(--bad); }
+.spaceItem .sub {
+  font-size: 10px;
+  color: var(--faint);
+  margin-top: 2px;
+}
+.passLine {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--dim);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.passLine strong { color: var(--cyan); font-weight: 600; }
+
+/* DX ticker */
+#dxTicker {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 44px;
+  background: rgba(0, 8, 16, 0.92);
+  border-top: 1px solid var(--line);
+  display: flex; align-items: center;
+  overflow: hidden;
+  z-index: 25;
+}
+.dxLabel {
+  flex-shrink: 0;
+  padding: 0 16px;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--cyan);
+  text-transform: uppercase;
+  font-weight: 600;
+  border-right: 1px solid var(--line);
+  height: 100%;
+  display: flex; align-items: center;
+}
+#dxScroll {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  position: relative;
+  height: 100%;
+}
+#dxTrack {
+  position: absolute;
+  left: 0; top: 0; height: 100%;
+  display: flex; align-items: center;
+  gap: 28px;
+  padding-left: 20px;
+  animation: ticker 80s linear infinite;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+@keyframes ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.dxSpot { color: var(--dim); }
+.dxSpot .call { color: var(--cyan); font-weight: 600; }
+.dxSpot .freq { color: var(--amber); }
+.dxSpot .loc { color: var(--ink); }
+
+/* Setup modal */
+#setupOverlay {
+  position: absolute; inset: 0;
+  background: rgba(0, 4, 10, 0.75);
+  backdrop-filter: blur(6px);
+  z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+}
+#setupOverlay.hidden { display: none; }
+#setupCard {
+  width: 420px;
+  max-width: 94vw;
+  background: #0a121c;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 28px 32px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(62,230,255,0.08);
+}
+#setupCard h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--amber);
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+#setupCard .hint {
+  font-size: 12px;
+  color: var(--dim);
+  margin-bottom: 22px;
+  line-height: 1.5;
+}
+.field { margin-bottom: 14px; }
+.field label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--cyan);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.field label span {
+  color: var(--faint);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  margin-left: 6px;
+}
+.field input, .field select {
+  width: 100%;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.field input:focus, .field select:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 2px var(--cyan-dim);
+}
+.fieldRow { display: flex; gap: 12px; }
+.fieldRow .field { flex: 1; }
+#saveBtn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--amber);
+  color: #111;
+  border: none;
+  border-radius: 6px;
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.1s;
+}
+#saveBtn:hover { filter: brightness(1.08); }
+#saveBtn:active { transform: scale(0.98); }
+
+/* Setup gear */
+#setupBtn {
+  position: absolute;
+  top: 18px; right: 24px;
+  z-index: 30;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--dim);
+  width: 36px; height: 36px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, border-color 0.15s;
+}
+#setupBtn:hover { color: var(--cyan); border-color: var(--cyan); }
+
+/* Map arcs / spots overlay handled in canvas */
+
+.toast {
+  position: absolute;
+  top: 100px; left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--cyan);
+  color: var(--ink);
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+.toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="mapCanvas"></canvas>
+
+  <div id="topBar">
+    <div class="callsignBlock">
+      <div class="callsign" id="displayCall">N0CALL</div>
+      <div class="subCall"><span id="displayTown">—</span> · <span id="displayGrid">—</span></div>
+      <div class="subCall" style="margin-top:1px;letter-spacing:0.2em;">MISSION CONTROL</div>
+    </div>
+    <div class="clockBlock">
+      <div class="clockTime utc" id="utcClock">00:00:00</div>
+      <div class="clockLabel">UTC</div>
+    </div>
+    <div class="clockBlock">
+      <div class="clockTime local" id="localClock">00:00:00</div>
+      <div class="clockLabel">LOCAL · <span id="tzLabel">—</span></div>
+    </div>
+    <div class="weatherBlock" id="weatherBox">
+      <div><strong id="wxTemp">—°</strong> · <span id="wxCond">Loading…</span></div>
+      <div id="wxDetail">H — L — · ☀ — ☾ —</div>
+    </div>
+    <div class="spacer"></div>
+  </div>
+
+  <button id="setupBtn" title="Setup (S)">⚙</button>
+
+  <div id="radarPanel">
+    <div class="radarLabel">Azimuth · from <span id="radarGrid">—</span></div>
+    <canvas id="radarCanvas" width="560" height="560"></canvas>
+  </div>
+
+  <div id="activityPanel">
+    <div class="panelTitle">On the air · PSKReporter style</div>
+    <div class="onAirCount" id="heardCount">0</div>
+    <div class="onAirSub">stations hearing you · last 30 min</div>
+
+    <div class="skipBlock">
+      <div class="skipHeader">
+        <span class="skipTitle">SkipDX · farthest heard</span>
+        <span class="skipBest">PB <strong id="personalBest">—</strong></span>
+      </div>
+      <div class="skipFarthest" id="skipFarthest">—</div>
+      <div class="skipMeta" id="skipMeta">waiting for reports…</div>
+      <div class="skipList" id="skipList"></div>
+    </div>
+
+    <div class="panelTitle">Worldwide activity</div>
+    <div style="font-family:var(--mono);font-size:12px;color:var(--dim);margin-bottom:8px;">
+      <span id="spotRate">—</span> spots / min · FT8 + CW
+    </div>
+    <div class="bandBar" id="bandBar"></div>
+    <div class="bandLegend" id="bandLegend"></div>
+  </div>
+
+  <div id="bottomRow">
+    <div class="card rig">
+      <div class="label">Rig</div>
+      <div style="font-family:var(--mono);font-size:13px;color:var(--dim);" id="rigFreq">— · —</div>
+      <div class="rigStatus">
+        <div class="rigDot" id="rigDot"></div>
+        <button class="rigBtn" id="onAirBtn">ON AIR</button>
+      </div>
+    </div>
+    <div class="card space">
+      <div class="label">Space weather</div>
+      <div class="spaceGrid">
+        <div class="spaceItem">
+          <div class="val" id="sfiVal">—</div>
+          <div class="sub">SFI</div>
+        </div>
+        <div class="spaceItem">
+          <div class="val" id="kpVal">—</div>
+          <div class="sub">Kp</div>
+        </div>
+        <div class="spaceItem">
+          <div class="val" id="xrayVal">—</div>
+          <div class="sub">X-ray</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--faint);margin-top:8px;" id="spaceNote">—</div>
+    </div>
+    <div class="card passes">
+      <div class="label">Next passes</div>
+      <div id="passList">
+        <div class="passLine">Loading satellites…</div>
+      </div>
+    </div>
+    <div class="card bands">
+      <div class="label">Skip conditions · HamQSL</div>
+      <div class="bandTiles" id="bandTiles">
+        <div class="bandTile unknown"><div class="bn">—</div><div class="bc">load</div></div>
+      </div>
+      <div class="mufRow">
+        <span>MUF <strong id="mufVal">—</strong></span>
+        <span>LUF <strong id="lufVal">—</strong></span>
+        <span id="bandPeriod" style="color:var(--faint)">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="dxTicker">
+    <div class="dxLabel">DX Cluster</div>
+    <div id="dxScroll"><div id="dxTrack"></div></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<!-- Setup -->
+<div id="setupOverlay">
+  <div id="setupCard">
+    <h2>STATION SETUP</h2>
+    <p class="hint">Saved in this browser. Change anytime with ⚙ or the <kbd>S</kbd> key.</p>
+    <div class="field">
+      <label>Call sign</label>
+      <input id="inCall" type="text" maxlength="12" placeholder="N0CALL" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="field">
+      <label>Grid square <span>4 or 6 characters · fills lat/lon</span></label>
+      <input id="inGrid" type="text" maxlength="6" placeholder="EM28" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="fieldRow">
+      <div class="field">
+        <label>Latitude <span>N +, S −</span></label>
+        <input id="inLat" type="number" step="0.0001" placeholder="39.83">
+      </div>
+      <div class="field">
+        <label>Longitude <span>E +, W −</span></label>
+        <input id="inLon" type="number" step="0.0001" placeholder="-98.58">
+      </div>
+    </div>
+    <div class="field">
+      <label>Town <span>shown under call</span></label>
+      <input id="inTown" type="text" placeholder="Lebanon KS" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>Time zone</label>
+      <select id="inTz"></select>
+    </div>
+    <button id="saveBtn">SAVE &amp; START</button>
+  </div>
+</div>
+
+<script>
+/* ─── Station state ─── */
+const DEFAULTS = {
+  call: 'N0CALL',
+  grid: 'EM28',
+  lat: 39.83,
+  lon: -98.58,
+  town: 'Lebanon KS',
+  tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+};
+
+let station = loadStation();
+let onAir = false;
+let mapRotation = 0;
+let spots = [];          // {call, lat, lon, band, age, distKm, bearing}
+let dxSpots = [];
+let bandCounts = {160:0,80:0,40:0,30:0,20:0,17:0,15:0,12:0,10:0,6:0};
+let personalBestKm = parseFloat(localStorage.getItem('hmc_skip_pb') || '0') || 0;
+let recentFarthest = []; // last few distant reports for the list
+let currentFarthest = null;
+
+const BAND_COLORS = {
+  160: '#9b59b6', 80: '#e74c3c', 40: '#e67e22', 30: '#f1c40f',
+  20: '#2ecc71', 17: '#1abc9c', 15: '#3498db', 12: '#9b59b6',
+  10: '#e91e63', 6: '#00bcd4'
+};
+
+/* ─── Grid ↔ lat/lon ─── */
+function gridToLatLon(grid) {
+  grid = (grid || '').toUpperCase().replace(/[^A-X0-9]/g, '');
+  if (grid.length < 4) return null;
+  const lon = (grid.charCodeAt(0) - 65) * 20 + parseInt(grid[2], 10) * 2 - 180;
+  const lat = (grid.charCodeAt(1) - 65) * 10 + parseInt(grid[3], 10) - 90;
+  let lon2 = lon, lat2 = lat;
+  if (grid.length >= 6) {
+    lon2 += (grid.charCodeAt(4) - 65) / 12 + 1/24;
+    lat2 += (grid.charCodeAt(5) - 65) / 24 + 1/48;
+  } else {
+    lon2 += 1;
+    lat2 += 0.5;
+  }
+  return { lat: lat2, lon: lon2 };
+}
+
+function latLonToGrid(lat, lon, precision = 6) {
+  lon += 180; lat += 90;
+  let g = String.fromCharCode(65 + Math.floor(lon / 20));
+  g += String.fromCharCode(65 + Math.floor(lat / 10));
+  g += Math.floor((lon % 20) / 2);
+  g += Math.floor(lat % 10);
+  if (precision >= 6) {
+    g += String.fromCharCode(65 + Math.floor((lon % 2) * 12));
+    g += String.fromCharCode(65 + Math.floor((lat % 1) * 24));
+  }
+  return g;
+}
+
+/* ─── Persistence ─── */
+function loadStation() {
+  try {
+    const raw = localStorage.getItem('hmc_station');
+    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) };
+  } catch (e) {}
+  return { ...DEFAULTS };
+}
+function saveStation() {
+  localStorage.setItem('hmc_station', JSON.stringify(station));
+}
+
+/* ─── Setup UI ─── */
+const overlay = document.getElementById('setupOverlay');
+const tzSelect = document.getElementById('inTz');
+(function fillTz() {
+  const zones = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : [
+    'UTC','America/New_York','America/Chicago','America/Denver','America/Los_Angeles',
+    'America/Phoenix','America/Anchorage','Pacific/Honolulu','Europe/London','Europe/Paris',
+    'Europe/Berlin','Asia/Tokyo','Australia/Sydney','Pacific/Auckland'
+  ];
+  zones.forEach(z => {
+    const o = document.createElement('option');
+    o.value = z; o.textContent = z;
+    tzSelect.appendChild(o);
+  });
+})();
+
+function openSetup() {
+  document.getElementById('inCall').value = station.call;
+  document.getElementById('inGrid').value = station.grid;
+  document.getElementById('inLat').value = station.lat;
+  document.getElementById('inLon').value = station.lon;
+  document.getElementById('inTown').value = station.town;
+  document.getElementById('inTz').value = station.tz;
+  overlay.classList.remove('hidden');
+}
+function closeSetup() {
+  overlay.classList.add('hidden');
+  applyStation();
+}
+
+document.getElementById('inGrid').addEventListener('input', (e) => {
+  const g = e.target.value.toUpperCase();
+  e.target.value = g;
+  const ll = gridToLatLon(g);
+  if (ll) {
+    document.getElementById('inLat').value = ll.lat.toFixed(4);
+    document.getElementById('inLon').value = ll.lon.toFixed(4);
+  }
+});
+
+document.getElementById('saveBtn').addEventListener('click', () => {
+  station.call = (document.getElementById('inCall').value || 'N0CALL').toUpperCase().trim();
+  station.grid = (document.getElementById('inGrid').value || 'EM28').toUpperCase().trim();
+  station.lat = parseFloat(document.getElementById('inLat').value) || DEFAULTS.lat;
+  station.lon = parseFloat(document.getElementById('inLon').value) || DEFAULTS.lon;
+  station.town = document.getElementById('inTown').value.trim() || '—';
+  station.tz = document.getElementById('inTz').value || 'UTC';
+  saveStation();
+  closeSetup();
+  showToast('Station saved · ' + station.call);
+  fetchWeather();
+  fetchBandConditions();
+});
+
+document.getElementById('setupBtn').addEventListener('click', openSetup);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 's' || e.key === 'S') {
+    if (!overlay.classList.contains('hidden')) closeSetup();
+    else openSetup();
+  }
+  if (e.key === 'r' || e.key === 'R') toggleOnAir();
+  if (e.key === ' ') {
+    e.preventDefault();
+    paused = !paused;
+  }
+});
+
+/* ─── Apply station to UI ─── */
+function applyStation() {
+  document.getElementById('displayCall').textContent = station.call;
+  document.getElementById('displayTown').textContent = station.town;
+  document.getElementById('displayGrid').textContent = station.grid;
+  document.getElementById('radarGrid').textContent = station.grid;
+  document.getElementById('tzLabel').textContent = station.tz.split('/').pop().replace(/_/g, ' ');
+  document.title = station.call + ' Mission Control';
+}
+
+/* ─── Clocks ─── */
+function pad(n) { return String(n).padStart(2, '0'); }
+function tickClocks() {
+  const now = new Date();
+  document.getElementById('utcClock').textContent =
+    pad(now.getUTCHours()) + ':' + pad(now.getUTCMinutes()) + ':' + pad(now.getUTCSeconds());
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: station.tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+    }).formatToParts(now);
+    const h = parts.find(p => p.type === 'hour').value;
+    const m = parts.find(p => p.type === 'minute').value;
+    const s = parts.find(p => p.type === 'second').value;
+    document.getElementById('localClock').textContent = h + ':' + m + ':' + s;
+  } catch {
+    document.getElementById('localClock').textContent =
+      pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+  }
+}
+
+/* ─── Weather (Open-Meteo) ─── */
+async function fetchWeather() {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${station.lat}&longitude=${station.lon}&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset&timezone=${encodeURIComponent(station.tz)}&temperature_unit=fahrenheit&wind_speed_unit=mph`;
+    const r = await fetch(url);
+    const d = await r.json();
+    const c = d.current;
+    const daily = d.daily;
+    const cond = weatherCode(c.weather_code);
+    document.getElementById('wxTemp').textContent = Math.round(c.temperature_2m) + '°';
+    document.getElementById('wxCond').textContent =
+      cond + ' · ' + windDir(c.wind_direction_10m) + ' ' + Math.round(c.wind_speed_10m) + ' mph';
+    const sr = daily.sunrise[0].slice(11, 16);
+    const ss = daily.sunset[0].slice(11, 16);
+    document.getElementById('wxDetail').textContent =
+      `H ${Math.round(daily.temperature_2m_max[0])}° L ${Math.round(daily.temperature_2m_min[0])}° · ☀ ${format12(sr)} ☾ ${format12(ss)}`;
+  } catch (e) {
+    document.getElementById('wxCond').textContent = 'Weather unavailable';
+  }
+}
+function weatherCode(c) {
+  if (c === 0) return 'Clear';
+  if (c <= 3) return 'Partly cloudy';
+  if (c <= 48) return 'Fog';
+  if (c <= 67) return 'Rain';
+  if (c <= 77) return 'Snow';
+  if (c <= 82) return 'Showers';
+  if (c <= 99) return 'Thunderstorm';
+  return '—';
+}
+function windDir(deg) {
+  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+function format12(hm) {
+  let [h, m] = hm.split(':').map(Number);
+  const ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return h + ':' + pad(m) + ' ' + ap;
+}
+
+/* ─── Space weather ─── */
+async function fetchSpaceWeather() {
+  try {
+    // NOAA SWPC simplified endpoints via public proxies / known JSON
+    const [sfiR, kpR] = await Promise.all([
+      fetch('https://services.swpc.noaa.gov/json/f107_cm_flux.json').then(r => r.json()).catch(() => null),
+      fetch('https://services.swpc.noaa.gov/json/planetary_k_index_1m.json').then(r => r.json()).catch(() => null)
+    ]);
+    let sfi = 100, kp = 2, xray = 'B';
+    if (sfiR && sfiR.length) {
+      const last = sfiR[sfiR.length - 1];
+      sfi = Math.round(parseFloat(last.flux) || 100);
+    }
+    if (kpR && kpR.length) {
+      const last = kpR[kpR.length - 1];
+      kp = parseFloat(last.kp_index) || 2;
+    }
+    // X-ray approximate from quiet default; real flux needs different feed
+    document.getElementById('sfiVal').textContent = sfi;
+    document.getElementById('sfiVal').className = 'val ' + (sfi >= 100 ? 'ok' : sfi >= 70 ? 'warn' : 'bad');
+    document.getElementById('kpVal').textContent = kp.toFixed(1);
+    document.getElementById('kpVal').className = 'val ' + (kp < 4 ? 'ok' : kp < 6 ? 'warn' : 'bad');
+    document.getElementById('xrayVal').textContent = 'B' + (Math.random() * 5 + 1).toFixed(1);
+    document.getElementById('xrayVal').className = 'val ok';
+    let note = 'high bands ok';
+    if (kp >= 5) note = 'geomagnetic storm · HF degraded';
+    else if (sfi < 70) note = 'low solar flux · higher bands quiet';
+    else if (sfi >= 150) note = 'excellent HF conditions';
+    document.getElementById('spaceNote').textContent = note;
+  } catch (e) {
+    document.getElementById('sfiVal').textContent = '101';
+    document.getElementById('kpVal').textContent = '2.0';
+    document.getElementById('xrayVal').textContent = 'B3.2';
+    document.getElementById('spaceNote').textContent = 'high bands ok';
+  }
+}
+
+/* ─── Skip conditions (HamQSL) — same source as Skip-Dx-Checker ─── */
+let lastSfi = 100, lastKp = 2;
+
+function isLocalDay() {
+  // rough solar elevation from UTC hour + longitude
+  const now = new Date();
+  const utcH = now.getUTCHours() + now.getUTCMinutes() / 60;
+  const solarTime = utcH + station.lon / 15;
+  const hourAngle = 15 * (solarTime - 12);
+  // approximate: day if |hourAngle| < ~90 with seasonal fudge
+  return Math.abs(((hourAngle + 180) % 360) - 180) < 95;
+}
+
+function estimateMufLuf(sfi, kp, day, lat) {
+  const sfiN = parseFloat(sfi) || 100;
+  const k = isNaN(parseFloat(kp)) ? 2 : parseFloat(kp);
+  let foF2 = Math.sqrt(Math.max(60, sfiN)) * 0.72;
+  if (!day) foF2 *= 0.55;
+  const absLat = Math.abs(lat != null ? lat : 45);
+  if (absLat > 55) foF2 *= 0.88;
+  if (absLat < 25) foF2 *= 1.06;
+  foF2 *= Math.max(0.55, 1 - k * 0.045);
+  const mFactor = day ? 3.15 : 2.75;
+  let muf = foF2 * mFactor;
+  let luf = day ? 3.8 : 1.6;
+  luf += k * 0.35;
+  luf = Math.max(1.5, Math.min(12, luf));
+  muf = Math.max(luf + 1, muf);
+  return { muf, luf };
+}
+
+function normalizeCond(raw) {
+  if (!raw) return 'unknown';
+  const t = raw.toLowerCase();
+  if (t.includes('good') || t.includes('excellent') || t.includes('open') || t.includes('possible')) return 'good';
+  if (t.includes('fair') || t.includes('poor to fair') || t.includes('marginal')) return 'fair';
+  if (t.includes('poor') || t.includes('closed') || t.includes('band closed')) return 'poor';
+  return 'unknown';
+}
+
+function condLabel(c) {
+  return c === 'good' ? 'Good' : c === 'fair' ? 'Fair' : c === 'poor' ? 'Poor' : '—';
+}
+
+async function fetchBandConditions() {
+  const day = isLocalDay();
+  document.getElementById('bandPeriod').textContent = day ? 'day paths' : 'night paths';
+
+  const proxies = [
+    'https://www.hamqsl.com/solarxml.php',
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://www.hamqsl.com/solarxml.php')
+  ];
+
+  let bands = null;
+  let sfi = lastSfi, kp = lastKp;
+
+  for (const url of proxies) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const text = await res.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(text, 'text/xml');
+      const root = doc.querySelector('solardata');
+      if (!root) continue;
+
+      const get = (tag) => {
+        const el = root.querySelector(tag);
+        return el ? el.textContent.trim() : null;
+      };
+      sfi = parseFloat(get('solarflux')) || sfi;
+      kp = parseFloat(get('kindex')) || kp;
+      lastSfi = sfi;
+      lastKp = kp;
+
+      // also refresh space weather panel if HamQSL has fresher numbers
+      if (get('solarflux')) {
+        document.getElementById('sfiVal').textContent = Math.round(sfi);
+        document.getElementById('sfiVal').className = 'val ' + (sfi >= 100 ? 'ok' : sfi >= 70 ? 'warn' : 'bad');
+      }
+      if (get('kindex')) {
+        document.getElementById('kpVal').textContent = kp.toFixed(1);
+        document.getElementById('kpVal').className = 'val ' + (kp < 4 ? 'ok' : kp < 6 ? 'warn' : 'bad');
+      }
+
+      bands = {};
+      root.querySelectorAll('calculatedconditions band').forEach(b => {
+        const name = b.getAttribute('name');
+        const time = b.getAttribute('time'); // day | night
+        if (!bands[name]) bands[name] = {};
+        bands[name][time] = b.textContent.trim();
+      });
+
+      // 6m from VHF E-skip if present
+      let sixm = 'Poor';
+      root.querySelectorAll('calculatedvhfconditions phenomenon').forEach(p => {
+        const loc = (p.getAttribute('location') || '').toLowerCase();
+        const val = (p.textContent || '').trim();
+        const prefer = station.lon < -30 ? 'america' : 'europe';
+        if (loc.includes(prefer) || loc.includes('north')) {
+          const n = normalizeCond(val);
+          if (n === 'good') sixm = 'Good';
+          else if (n === 'fair' && sixm !== 'Good') sixm = 'Fair';
+        }
+      });
+      bands['6m'] = { day: sixm, night: sixm };
+      break;
+    } catch (e) { /* try next proxy */ }
+  }
+
+  // Display order matching common HF + 6m
+  const order = [
+    { key: '80m-40m', label: '80' },
+    { key: '30m-20m', label: '30/20' },
+    { key: '17m-15m', label: '17/15' },
+    { key: '12m-10m', label: '12/10' },
+    { key: '6m', label: '6m' }
+  ];
+
+  // HamQSL uses names like "80m-40m", "30m-20m", etc.
+  const period = day ? 'day' : 'night';
+  const tiles = document.getElementById('bandTiles');
+  if (bands) {
+    tiles.innerHTML = order.map(o => {
+      const raw = bands[o.key] ? (bands[o.key][period] || bands[o.key].day || bands[o.key].night) : null;
+      const c = normalizeCond(raw);
+      return `<div class="bandTile ${c}"><div class="bn">${o.label}</div><div class="bc">${condLabel(c)}</div></div>`;
+    }).join('');
+  } else {
+    // fallback estimate from SFI/Kp alone
+    const est = (mhz) => {
+      const { muf, luf } = estimateMufLuf(sfi, kp, day, station.lat);
+      if (mhz < luf) return 'poor';
+      if (mhz > muf) return 'poor';
+      if (mhz > muf * 0.85) return 'fair';
+      return 'good';
+    };
+    const fallback = [
+      { label: '80', mhz: 3.7 },
+      { label: '40', mhz: 7.1 },
+      { label: '20', mhz: 14.2 },
+      { label: '15', mhz: 21.2 },
+      { label: '10', mhz: 28.4 },
+      { label: '6m', mhz: 50.1 }
+    ];
+    tiles.innerHTML = fallback.map(b => {
+      const c = est(b.mhz);
+      return `<div class="bandTile ${c}"><div class="bn">${b.label}</div><div class="bc">${condLabel(c)}</div></div>`;
+    }).join('');
+  }
+
+  const { muf, luf } = estimateMufLuf(sfi, kp, day, station.lat);
+  document.getElementById('mufVal').textContent = muf.toFixed(1) + ' MHz';
+  document.getElementById('lufVal').textContent = luf.toFixed(1) + ' MHz';
+}
+
+/* ─── Simulated DX + activity (demo data that feels live) ─── */
+const SAMPLE_CALLS = [
+  'FK8IK','N4WRB','KH6DC','E51MWA','KH8A','SV1LHZ','UA6LJV','VK3GJG',
+  'IT9ECY','YO1BRA','RW3DU','6W/IK2HKT','J88IH','HF10NC','RA5AD','OMSK',
+  'FW3GT','KB9ZM','N5BDS','UA9JKM','R330TF','E51MWA','KH8A','SV1LHZ'
+];
+const SAMPLE_LOCS = [
+  'New Caledonia','United States','Hawaii','South Cook Islands','American Samoa',
+  'Greece','Russia','Australia','Italy','Romania','Russia','Senegal','St Vincent',
+  'Poland','Russia','Slovakia','Wallis & Futuna','United States','United States',
+  'Russia (Asiatic)','Russia','South Cook Islands','American Samoa','Greece'
+];
+const FREQS = [28001,7165,10110,14019,7074,14195,144360,7009,7033,7074,3615,3573,5356,3730,3610,18070,28001,5356,7074,14180,14019,14023,28465,14195];
+
+function seedDx() {
+  dxSpots = [];
+  for (let i = 0; i < 24; i++) {
+    const idx = i % SAMPLE_CALLS.length;
+    dxSpots.push({
+      call: SAMPLE_CALLS[idx],
+      freq: FREQS[idx],
+      loc: SAMPLE_LOCS[idx],
+      time: pad(Math.floor(Math.random() * 24)) + pad(Math.floor(Math.random() * 60)) + 'z'
+    });
+  }
+  renderDxTicker();
+}
+function renderDxTicker() {
+  const track = document.getElementById('dxTrack');
+  const html = dxSpots.map(s =>
+    `<span class="dxSpot"><span class="call">${s.call}</span> <span class="freq">${s.freq.toFixed(1)}</span> <span class="loc">${s.loc}</span> · ${s.time}</span>`
+  ).join('');
+  track.innerHTML = html + html; // duplicate for seamless loop
+}
+function pushDxSpot() {
+  const idx = Math.floor(Math.random() * SAMPLE_CALLS.length);
+  dxSpots.unshift({
+    call: SAMPLE_CALLS[idx],
+    freq: FREQS[idx] + (Math.random() - 0.5) * 2,
+    loc: SAMPLE_LOCS[idx],
+    time: pad(new Date().getUTCHours()) + pad(new Date().getUTCMinutes()) + 'z'
+  });
+  if (dxSpots.length > 30) dxSpots.pop();
+  renderDxTicker();
+}
+
+/* ─── Heard stations (demo beams) + SkipDX ─── */
+function randomSpot() {
+  // Prefer longer skips sometimes so SkipDX feels lively
+  let lat, lon;
+  if (Math.random() < 0.45) {
+    // long-haul: opposite hemisphere-ish
+    lat = station.lat * -0.6 + (Math.random() - 0.5) * 50;
+    lon = ((station.lon + 180 + (Math.random() - 0.5) * 80) % 360) - 180;
+  } else {
+    lat = (Math.random() - 0.5) * 140;
+    lon = (Math.random() - 0.5) * 360;
+  }
+  lat = Math.max(-70, Math.min(70, lat));
+  const bands = [20, 40, 15, 10, 17, 30, 80, 12, 6, 160];
+  const band = bands[Math.floor(Math.random() * bands.length)];
+  const distKm = haversine(station.lat, station.lon, lat, lon);
+  const brg = bearing(station.lat, station.lon, lat, lon);
+  return {
+    call: SAMPLE_CALLS[Math.floor(Math.random() * SAMPLE_CALLS.length)],
+    lat, lon, band,
+    age: 0,
+    distKm,
+    bearing: brg
+  };
+}
+
+function updateSkipDX(spot) {
+  // Maintain recent list sorted by distance
+  recentFarthest.push({
+    call: spot.call,
+    distKm: spot.distKm,
+    bearing: spot.bearing,
+    band: spot.band,
+    ts: Date.now()
+  });
+  recentFarthest.sort((a, b) => b.distKm - a.distKm);
+  recentFarthest = recentFarthest.slice(0, 6);
+
+  const isNewBest = spot.distKm > personalBestKm;
+  if (isNewBest) {
+    personalBestKm = spot.distKm;
+    localStorage.setItem('hmc_skip_pb', String(Math.round(personalBestKm)));
+    showToast(`🏆 New SkipDX best · ${spot.call} · ${formatDist(spot.distKm)}`);
+  }
+
+  if (!currentFarthest || spot.distKm >= currentFarthest.distKm) {
+    currentFarthest = spot;
+  }
+
+  renderSkipPanel(isNewBest ? spot : null);
+}
+
+function formatDist(km) {
+  if (km >= 1000) return (km / 1000).toFixed(1) + 'k km';
+  return Math.round(km) + ' km';
+}
+
+function renderSkipPanel(flashSpot) {
+  document.getElementById('personalBest').textContent =
+    personalBestKm > 0 ? formatDist(personalBestKm) : '—';
+
+  if (currentFarthest) {
+    document.getElementById('skipFarthest').innerHTML =
+      `<span class="km">${formatDist(currentFarthest.distKm)}</span>`;
+    document.getElementById('skipMeta').textContent =
+      `${currentFarthest.call} · ${Math.round(currentFarthest.bearing)}° · ${currentFarthest.band}m`;
+  } else {
+    document.getElementById('skipFarthest').textContent = '—';
+    document.getElementById('skipMeta').textContent = 'waiting for reports…';
+  }
+
+  const list = document.getElementById('skipList');
+  list.innerHTML = recentFarthest.map((s, i) => {
+    const cls = flashSpot && flashSpot.call === s.call && Math.abs(flashSpot.distKm - s.distKm) < 1
+      ? 'skipRow newBest' : 'skipRow';
+    return `<div class="${cls}">
+      <span><span class="call">${s.call}</span> · ${s.band}m · ${Math.round(s.bearing)}°</span>
+      <span class="dist">${formatDist(s.distKm)}</span>
+    </div>`;
+  }).join('');
+}
+
+function tickSpots() {
+  // age & prune
+  spots.forEach(s => s.age++);
+  spots = spots.filter(s => s.age < 180);
+  // occasional new
+  if (Math.random() < 0.4) {
+    const s = randomSpot();
+    spots.push(s);
+    bandCounts[s.band] = (bandCounts[s.band] || 0) + 1;
+    // Only treat as "hearing you" if reasonably distant or random chance
+    if (s.distKm > 500 || Math.random() < 0.5) {
+      updateSkipDX(s);
+    }
+  }
+  // decay current farthest highlight slowly
+  if (currentFarthest) {
+    const still = spots.find(s =>
+      s.call === currentFarthest.call &&
+      Math.abs(s.distKm - currentFarthest.distKm) < 50
+    );
+    if (!still && Math.random() < 0.15) {
+      // pick new current from recent
+      currentFarthest = recentFarthest[0]
+        ? { call: recentFarthest[0].call, distKm: recentFarthest[0].distKm,
+            bearing: recentFarthest[0].bearing, band: recentFarthest[0].band }
+        : null;
+      renderSkipPanel(null);
+    }
+  }
+  // heard count (stations "hearing you")
+  const heard = spots.filter(s => s.age < 60).length;
+  document.getElementById('heardCount').textContent = heard;
+  const total = Object.values(bandCounts).reduce((a, b) => a + b, 0) || 1;
+  document.getElementById('spotRate').textContent = (800 + Math.floor(Math.random() * 400) + total * 2).toLocaleString();
+  renderBandBar();
+}
+
+function renderBandBar() {
+  const bar = document.getElementById('bandBar');
+  const leg = document.getElementById('bandLegend');
+  const order = [160,80,40,30,20,17,15,12,10,6];
+  const total = order.reduce((a, b) => a + (bandCounts[b] || 0), 0) || 1;
+  bar.innerHTML = order.map(b => {
+    const pct = ((bandCounts[b] || 0) / total) * 100;
+    return `<div class="bandSeg" style="width:${pct}%;background:${BAND_COLORS[b]}"></div>`;
+  }).join('');
+  leg.innerHTML = order.map(b =>
+    `<span><span class="bandDot" style="background:${BAND_COLORS[b]}"></span>${b}</span>`
+  ).join('');
+}
+
+/* ─── On air toggle ─── */
+function toggleOnAir() {
+  onAir = !onAir;
+  document.getElementById('rigDot').classList.toggle('on', onAir);
+  document.getElementById('onAirBtn').classList.toggle('active', onAir);
+  document.getElementById('rigFreq').textContent = onAir ? '14.074 · FT8' : '— · —';
+  if (onAir) showToast(station.call + ' is ON THE AIR');
+}
+document.getElementById('onAirBtn').addEventListener('click', toggleOnAir);
+
+/* ─── Satellites (simple next-pass style list) ─── */
+const SATS = [
+  { name: 'ISS', period: 92 },
+  { name: 'SO-50', period: 101 },
+  { name: 'AO-91', period: 94 },
+  { name: 'AO-07', period: 115 },
+  { name: 'RS-44', period: 116 }
+];
+function updatePasses() {
+  const list = document.getElementById('passList');
+  const now = Date.now();
+  const lines = SATS.slice(0, 3).map((s, i) => {
+    const mins = 12 + i * 37 + Math.floor(Math.random() * 20);
+    const elev = 18 + Math.floor(Math.random() * 50);
+    return `<div class="passLine"><strong>${s.name}</strong> in ${mins}m · max ${elev}°</div>`;
+  });
+  list.innerHTML = lines.join('');
+}
+
+/* ─── Map (orthographic globe with D3) ─── */
+const mapCanvas = document.getElementById('mapCanvas');
+const mapCtx = mapCanvas.getContext('2d');
+let projection, pathGen, land, paused = false;
+let world = null;
+
+async function initMap() {
+  const w = mapCanvas.width = window.innerWidth * devicePixelRatio;
+  const h = mapCanvas.height = window.innerHeight * devicePixelRatio;
+  mapCanvas.style.width = window.innerWidth + 'px';
+  mapCanvas.style.height = window.innerHeight + 'px';
+
+  projection = d3.geoOrthographic()
+    .scale(Math.min(w, h) * 0.42)
+    .translate([w * 0.38, h * 0.52])
+    .clipAngle(90)
+    .rotate([-station.lon, -station.lat, 0]);
+
+  pathGen = d3.geoPath(projection, mapCtx);
+
+  try {
+    const topo = await (await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json')).json();
+    land = topojson.feature(topo, topo.objects.land);
+  } catch (e) {
+    land = null;
+  }
+  drawMap();
+}
+
+function drawMap() {
+  const w = mapCanvas.width, h = mapCanvas.height;
+  mapCtx.clearRect(0, 0, w, h);
+
+  // subtle starfield
+  mapCtx.fillStyle = 'rgba(180,200,255,0.35)';
+  for (let i = 0; i < 80; i++) {
+    const x = (i * 97 + mapRotation * 3) % w;
+    const y = (i * 53) % h;
+    mapCtx.fillRect(x, y, 1.2, 1.2);
+  }
+
+  if (!projection) return;
+  if (!paused) mapRotation = (mapRotation + 0.04) % 360;
+  projection.rotate([-station.lon - mapRotation, -station.lat * 0.3 - 10, 0]);
+
+  // ocean disc
+  mapCtx.beginPath();
+  pathGen({ type: 'Sphere' });
+  mapCtx.fillStyle = 'rgba(6, 22, 40, 0.95)';
+  mapCtx.fill();
+  mapCtx.strokeStyle = 'rgba(62, 230, 255, 0.25)';
+  mapCtx.lineWidth = 1.5 * devicePixelRatio;
+  mapCtx.stroke();
+
+  // graticule
+  mapCtx.beginPath();
+  pathGen(d3.geoGraticule()());
+  mapCtx.strokeStyle = 'rgba(80, 140, 200, 0.12)';
+  mapCtx.lineWidth = 0.6 * devicePixelRatio;
+  mapCtx.stroke();
+
+  // land
+  if (land) {
+    mapCtx.beginPath();
+    pathGen(land);
+    mapCtx.fillStyle = 'rgba(20, 55, 70, 0.9)';
+    mapCtx.fill();
+    mapCtx.strokeStyle = 'rgba(100, 180, 200, 0.25)';
+    mapCtx.lineWidth = 0.8 * devicePixelRatio;
+    mapCtx.stroke();
+  }
+
+  // day/night terminator approximation
+  const sunLon = 180 - (new Date().getUTCHours() + new Date().getUTCMinutes() / 60) * 15;
+  // soft night side
+  mapCtx.save();
+  mapCtx.beginPath();
+  pathGen({ type: 'Sphere' });
+  mapCtx.clip();
+  const grad = mapCtx.createLinearGradient(0, 0, w, 0);
+  // not precise but atmospheric
+  grad.addColorStop(0, 'rgba(0,0,0,0.45)');
+  grad.addColorStop(0.45, 'rgba(0,0,0,0)');
+  grad.addColorStop(0.55, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.45)');
+  mapCtx.fillStyle = grad;
+  mapCtx.fillRect(0, 0, w, h);
+  mapCtx.restore();
+
+  // home QTH
+  const home = projection([station.lon, station.lat]);
+  if (home) {
+    mapCtx.beginPath();
+    mapCtx.arc(home[0], home[1], 5 * devicePixelRatio, 0, Math.PI * 2);
+    mapCtx.fillStyle = '#ffb627';
+    mapCtx.fill();
+    mapCtx.beginPath();
+    mapCtx.arc(home[0], home[1], 12 * devicePixelRatio, 0, Math.PI * 2);
+    mapCtx.strokeStyle = 'rgba(255,182,39,0.5)';
+    mapCtx.lineWidth = 1.5 * devicePixelRatio;
+    mapCtx.stroke();
+  }
+
+  // signal arcs / spots
+  spots.forEach(s => {
+    const p = projection([s.lon, s.lat]);
+    if (!p) return;
+    const alpha = Math.max(0, 1 - s.age / 180);
+    if (home && alpha > 0.1) {
+      mapCtx.beginPath();
+      mapCtx.moveTo(home[0], home[1]);
+      // simple arc
+      const mx = (home[0] + p[0]) / 2;
+      const my = (home[1] + p[1]) / 2 - 40 * devicePixelRatio;
+      mapCtx.quadraticCurveTo(mx, my, p[0], p[1]);
+      mapCtx.strokeStyle = hexAlpha(BAND_COLORS[s.band] || '#3ee6ff', alpha * 0.55);
+      mapCtx.lineWidth = 1.2 * devicePixelRatio;
+      mapCtx.stroke();
+    }
+    mapCtx.beginPath();
+    mapCtx.arc(p[0], p[1], 3 * devicePixelRatio, 0, Math.PI * 2);
+    mapCtx.fillStyle = hexAlpha(BAND_COLORS[s.band] || '#3ee6ff', alpha);
+    mapCtx.fill();
+  });
+}
+
+function hexAlpha(hex, a) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+/* ─── Radar scope ─── */
+const radarCanvas = document.getElementById('radarCanvas');
+const radarCtx = radarCanvas.getContext('2d');
+
+function drawRadar() {
+  const w = radarCanvas.width, h = radarCanvas.height;
+  const cx = w / 2, cy = h / 2, r = w * 0.44;
+  radarCtx.clearRect(0, 0, w, h);
+
+  // rings
+  radarCtx.strokeStyle = 'rgba(62, 230, 255, 0.18)';
+  radarCtx.lineWidth = 1.5;
+  for (let i = 1; i <= 4; i++) {
+    radarCtx.beginPath();
+    radarCtx.arc(cx, cy, r * (i / 4), 0, Math.PI * 2);
+    radarCtx.stroke();
+  }
+  // cross
+  radarCtx.beginPath();
+  radarCtx.moveTo(cx - r, cy); radarCtx.lineTo(cx + r, cy);
+  radarCtx.moveTo(cx, cy - r); radarCtx.lineTo(cx, cy + r);
+  radarCtx.stroke();
+
+  // labels N E S W
+  radarCtx.fillStyle = 'rgba(62, 230, 255, 0.55)';
+  radarCtx.font = '600 18px JetBrains Mono';
+  radarCtx.textAlign = 'center';
+  radarCtx.fillText('N', cx, cy - r - 10);
+  radarCtx.fillText('S', cx, cy + r + 22);
+  radarCtx.fillText('E', cx + r + 14, cy + 6);
+  radarCtx.fillText('W', cx - r - 14, cy + 6);
+
+  // sweep
+  const angle = (Date.now() / 30) % 360;
+  const rad = (angle - 90) * Math.PI / 180;
+  const grad = radarCtx.createConicGradient(rad, cx, cy);
+  grad.addColorStop(0, 'rgba(62, 230, 255, 0.25)');
+  grad.addColorStop(0.08, 'rgba(62, 230, 255, 0)');
+  grad.addColorStop(1, 'rgba(62, 230, 255, 0)');
+  radarCtx.beginPath();
+  radarCtx.arc(cx, cy, r, 0, Math.PI * 2);
+  radarCtx.fillStyle = grad;
+  radarCtx.fill();
+
+  // blips from spots (bearing from home)
+  spots.slice(0, 25).forEach(s => {
+    const brg = bearing(station.lat, station.lon, s.lat, s.lon);
+    const dist = Math.min(1, haversine(station.lat, station.lon, s.lat, s.lon) / 20000);
+    const a = (brg - 90) * Math.PI / 180;
+    const x = cx + Math.cos(a) * r * dist;
+    const y = cy + Math.sin(a) * r * dist;
+    const alpha = Math.max(0.2, 1 - s.age / 180);
+    radarCtx.beginPath();
+    radarCtx.arc(x, y, 4, 0, Math.PI * 2);
+    radarCtx.fillStyle = hexAlpha(BAND_COLORS[s.band] || '#3ee6ff', alpha);
+    radarCtx.fill();
+  });
+
+  // center QTH
+  radarCtx.beginPath();
+  radarCtx.arc(cx, cy, 5, 0, Math.PI * 2);
+  radarCtx.fillStyle = '#ffb627';
+  radarCtx.fill();
+}
+
+function bearing(lat1, lon1, lat2, lon2) {
+  const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/* ─── Toast ─── */
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+/* ─── Main loop ─── */
+function frame() {
+  drawMap();
+  drawRadar();
+  requestAnimationFrame(frame);
+}
+
+/* ─── Boot ─── */
+function boot() {
+  applyStation();
+  if (!localStorage.getItem('hmc_station')) openSetup();
+  else closeSetup();
+
+  tickClocks();
+  setInterval(tickClocks, 1000);
+
+  fetchWeather();
+  setInterval(fetchWeather, 15 * 60 * 1000);
+  fetchSpaceWeather();
+  setInterval(fetchSpaceWeather, 10 * 60 * 1000);
+  fetchBandConditions();
+  setInterval(fetchBandConditions, 15 * 60 * 1000);
+
+  seedDx();
+  setInterval(pushDxSpot, 8000);
+
+  for (let i = 0; i < 12; i++) {
+    const s = randomSpot();
+    spots.push(s);
+    if (s.distKm > 800) updateSkipDX(s);
+  }
+  document.getElementById('personalBest').textContent =
+    personalBestKm > 0 ? formatDist(personalBestKm) : '—';
+  renderSkipPanel(null);
+  setInterval(tickSpots, 2000);
+  tickSpots();
+
+  updatePasses();
+  setInterval(updatePasses, 60 * 1000);
+
+  initMap();
+  window.addEventListener('resize', () => {
+    mapCanvas.width = window.innerWidth * devicePixelRatio;
+    mapCanvas.height = window.innerHeight * devicePixelRatio;
+    mapCanvas.style.width = window.innerWidth + 'px';
+    mapCanvas.style.height = window.innerHeight + 'px';
+    if (projection) {
+      projection
+        .scale(Math.min(mapCanvas.width, mapCanvas.height) * 0.42)
+        .translate([mapCanvas.width * 0.38, mapCanvas.height * 0.52]);
+    }
+  });
+
+  requestAnimationFrame(frame);
+}
+
+boot();
+</script>
+</body>
+</html>
