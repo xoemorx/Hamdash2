@@ -2441,12 +2441,161 @@ function drawMoon() {
   }
 }
 
+/* Second Death Star — screen-fixed upper-right, slow axial spin */
+function drawDeathStar(w, h, dpr) {
+  // Stationary screen position: upper-right of the globe
+  const cx = w * 0.78;
+  const cy = h * 0.20;
+  const R = Math.min(w, h) * (perfMode ? 0.055 : 0.07);
+  // Slow rotation (~1 rev / 90s)
+  const spin = (Date.now() / 90000) * Math.PI * 2;
+
+  mapCtx.save();
+  mapCtx.translate(cx, cy);
+
+  // Soft space glow behind it
+  const glow = mapCtx.createRadialGradient(0, 0, R * 0.5, 0, 0, R * 2.2);
+  glow.addColorStop(0, 'rgba(80, 100, 120, 0.12)');
+  glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  mapCtx.fillStyle = glow;
+  mapCtx.beginPath();
+  mapCtx.arc(0, 0, R * 2.2, 0, Math.PI * 2);
+  mapCtx.fill();
+
+  // Main sphere body
+  const body = mapCtx.createRadialGradient(-R * 0.35, -R * 0.4, R * 0.1, 0, 0, R);
+  body.addColorStop(0, '#6a727c');
+  body.addColorStop(0.45, '#3a414a');
+  body.addColorStop(1, '#15181c');
+  mapCtx.beginPath();
+  mapCtx.arc(0, 0, R, 0, Math.PI * 2);
+  mapCtx.fillStyle = body;
+  mapCtx.fill();
+
+  // Clip to sphere for surface detail
+  mapCtx.save();
+  mapCtx.beginPath();
+  mapCtx.arc(0, 0, R, 0, Math.PI * 2);
+  mapCtx.clip();
+
+  // Surface panel lattice (rotates)
+  mapCtx.strokeStyle = 'rgba(20, 24, 28, 0.55)';
+  mapCtx.lineWidth = 0.7 * dpr;
+  const panels = perfMode ? 8 : 14;
+  for (let i = -panels; i <= panels; i++) {
+    const y = (i / panels) * R;
+    const half = Math.sqrt(Math.max(0, R * R - y * y));
+    mapCtx.beginPath();
+    mapCtx.moveTo(-half, y);
+    mapCtx.lineTo(half, y);
+    mapCtx.stroke();
+  }
+  for (let i = 0; i < panels; i++) {
+    const ang = spin + (i / panels) * Math.PI * 2;
+    mapCtx.beginPath();
+    mapCtx.moveTo(0, -R);
+    mapCtx.lineTo(Math.sin(ang) * R, Math.cos(ang) * R * 0.15);
+    mapCtx.lineTo(0, R);
+    mapCtx.stroke();
+  }
+
+  // Equatorial trench
+  mapCtx.beginPath();
+  mapCtx.ellipse(0, 0, R * 0.98, R * 0.12, 0, 0, Math.PI * 2);
+  mapCtx.strokeStyle = 'rgba(8, 10, 12, 0.85)';
+  mapCtx.lineWidth = 2.2 * dpr;
+  mapCtx.stroke();
+  mapCtx.beginPath();
+  mapCtx.ellipse(0, 0, R * 0.98, R * 0.06, 0, 0, Math.PI * 2);
+  mapCtx.strokeStyle = 'rgba(90, 100, 110, 0.35)';
+  mapCtx.lineWidth = 1 * dpr;
+  mapCtx.stroke();
+
+  // Superlaser dish (DS-II style, upper-left quadrant of the face)
+  const dishX = -R * 0.28 + Math.cos(spin) * R * 0.08;
+  const dishY = -R * 0.32 + Math.sin(spin * 0.7) * R * 0.05;
+  const dishR = R * 0.34;
+  mapCtx.beginPath();
+  mapCtx.arc(dishX, dishY, dishR, 0, Math.PI * 2);
+  mapCtx.fillStyle = 'rgba(12, 14, 18, 0.92)';
+  mapCtx.fill();
+  mapCtx.strokeStyle = 'rgba(100, 110, 120, 0.5)';
+  mapCtx.lineWidth = 1.2 * dpr;
+  mapCtx.stroke();
+  // Concentric dish rings
+  for (let k = 1; k <= 3; k++) {
+    mapCtx.beginPath();
+    mapCtx.arc(dishX, dishY, dishR * (k / 3.5), 0, Math.PI * 2);
+    mapCtx.strokeStyle = `rgba(70, 80, 90, ${0.25 + k * 0.08})`;
+    mapCtx.lineWidth = 0.8 * dpr;
+    mapCtx.stroke();
+  }
+  // Dim focusing crystal glint
+  mapCtx.beginPath();
+  mapCtx.arc(dishX, dishY, dishR * 0.08, 0, Math.PI * 2);
+  mapCtx.fillStyle = 'rgba(180, 210, 230, 0.35)';
+  mapCtx.fill();
+
+  // Incomplete northern hemisphere — scaffolding gap (Death Star II trademark)
+  // Cutaway wedge that rotates slowly
+  const gapA0 = spin * 0.35 - 0.9;
+  const gapA1 = gapA0 + 1.35;
+  mapCtx.beginPath();
+  mapCtx.moveTo(0, 0);
+  mapCtx.arc(0, 0, R * 1.02, gapA0, gapA1);
+  mapCtx.closePath();
+  mapCtx.fillStyle = 'rgba(4, 6, 10, 0.75)';
+  mapCtx.fill();
+
+  // Exposed internal lattice in the incomplete section
+  mapCtx.strokeStyle = 'rgba(120, 130, 140, 0.4)';
+  mapCtx.lineWidth = 0.9 * dpr;
+  for (let i = 0; i < 5; i++) {
+    const a = gapA0 + (i / 4) * (gapA1 - gapA0);
+    mapCtx.beginPath();
+    mapCtx.moveTo(Math.cos(a) * R * 0.35, Math.sin(a) * R * 0.35);
+    mapCtx.lineTo(Math.cos(a) * R * 0.95, Math.sin(a) * R * 0.95);
+    mapCtx.stroke();
+  }
+  // Cross-rings in the gap
+  for (let rFrac of [0.5, 0.7, 0.88]) {
+    mapCtx.beginPath();
+    mapCtx.arc(0, 0, R * rFrac, gapA0, gapA1);
+    mapCtx.stroke();
+  }
+
+  mapCtx.restore(); // end clip
+
+  // Rim highlight
+  mapCtx.beginPath();
+  mapCtx.arc(0, 0, R, 0, Math.PI * 2);
+  mapCtx.strokeStyle = 'rgba(140, 150, 160, 0.35)';
+  mapCtx.lineWidth = 1.2 * dpr;
+  mapCtx.stroke();
+
+  // Subtle specular edge on sunward side
+  mapCtx.beginPath();
+  mapCtx.arc(-R * 0.15, -R * 0.2, R * 0.92, -2.2, -0.6);
+  mapCtx.strokeStyle = 'rgba(200, 210, 220, 0.12)';
+  mapCtx.lineWidth = 2 * dpr;
+  mapCtx.stroke();
+
+  if (!perfMode) {
+    mapCtx.font = `${9 * dpr}px JetBrains Mono, monospace`;
+    mapCtx.fillStyle = 'rgba(150, 160, 175, 0.45)';
+    mapCtx.fillText('DS-II', R * 0.55, R * 1.25);
+  }
+
+  mapCtx.restore();
+}
+
 function drawMap() {
   const w = mapCanvas.width, h = mapCanvas.height;
   const dpr = canvasPixelRatio();
   mapCtx.clearRect(0, 0, w, h);
 
   drawCelestialBackground(w, h, dpr);
+  drawDeathStar(w, h, dpr);
 
   if (!projection) return;
   if (!paused) mapRotation = (mapRotation + (perfMode ? 0.07 : 0.04)) % 360;
