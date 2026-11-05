@@ -2105,19 +2105,211 @@ async function initMap() {
   drawMap();
 }
 
+function drawMilkyWay(w, h, dpr) {
+  // Soft galactic band + starfield behind the globe
+  const cx = w * 0.42, cy = h * 0.48;
+  const bandAngle = (-25 + mapRotation * 0.15) * Math.PI / 180;
+  const cosA = Math.cos(bandAngle), sinA = Math.sin(bandAngle);
+
+  // Diffuse glow of the Milky Way plane
+  mapCtx.save();
+  mapCtx.translate(cx, cy);
+  mapCtx.rotate(bandAngle);
+  const bandLen = Math.max(w, h) * 1.4;
+  const bandH = Math.min(w, h) * (perfMode ? 0.22 : 0.32);
+  const g = mapCtx.createLinearGradient(0, -bandH, 0, bandH);
+  g.addColorStop(0, 'rgba(40, 50, 90, 0)');
+  g.addColorStop(0.35, 'rgba(70, 85, 140, 0.12)');
+  g.addColorStop(0.5, 'rgba(160, 170, 220, 0.22)');
+  g.addColorStop(0.65, 'rgba(70, 85, 140, 0.12)');
+  g.addColorStop(1, 'rgba(40, 50, 90, 0)');
+  mapCtx.fillStyle = g;
+  mapCtx.fillRect(-bandLen / 2, -bandH, bandLen, bandH * 2);
+
+  // Warmish core lane
+  const g2 = mapCtx.createLinearGradient(0, -bandH * 0.35, 0, bandH * 0.35);
+  g2.addColorStop(0, 'rgba(255, 200, 160, 0)');
+  g2.addColorStop(0.5, 'rgba(255, 210, 180, 0.08)');
+  g2.addColorStop(1, 'rgba(255, 200, 160, 0)');
+  mapCtx.fillStyle = g2;
+  mapCtx.fillRect(-bandLen / 2, -bandH * 0.35, bandLen, bandH * 0.7);
+  mapCtx.restore();
+
+  // Dense stars along the band + sparse field elsewhere
+  const starN = perfMode ? 40 : 140;
+  for (let i = 0; i < starN; i++) {
+    // Deterministic pseudo-random
+    const u = ((i * 127.1 + 311.7) % 1000) / 1000;
+    const v = ((i * 269.5 + 183.3) % 1000) / 1000;
+    const along = (u - 0.5) * Math.max(w, h) * 1.3;
+    const across = (v - 0.5) * bandH * 1.8;
+    // Mix band stars with scattered field
+    let x, y;
+    if (i < starN * 0.65) {
+      x = cx + along * cosA - across * sinA;
+      y = cy + along * sinA + across * cosA;
+    } else {
+      x = (i * 97 + mapRotation * 2.2) % w;
+      y = (i * 53 + 17) % h;
+    }
+    const bright = 0.25 + ((i * 41) % 70) / 100;
+    const size = (i % 9 === 0 ? 1.8 : 1.1) * (dpr > 1 ? 1.1 : 1);
+    mapCtx.fillStyle = i % 11 === 0
+      ? `rgba(255, 220, 180, ${bright})`
+      : `rgba(180, 200, 255, ${bright})`;
+    mapCtx.fillRect(x, y, size, size);
+  }
+
+  // A few brighter "nebula" dust patches on the band
+  if (!perfMode) {
+    for (let i = 0; i < 5; i++) {
+      const t = (i / 5 - 0.5) * Math.max(w, h) * 0.9;
+      const ox = cx + t * cosA;
+      const oy = cy + t * sinA;
+      const rg = mapCtx.createRadialGradient(ox, oy, 0, ox, oy, Math.min(w, h) * 0.08);
+      rg.addColorStop(0, 'rgba(140, 150, 200, 0.1)');
+      rg.addColorStop(1, 'rgba(140, 150, 200, 0)');
+      mapCtx.fillStyle = rg;
+      mapCtx.beginPath();
+      mapCtx.arc(ox, oy, Math.min(w, h) * 0.08, 0, Math.PI * 2);
+      mapCtx.fill();
+    }
+  }
+}
+
+/* Mean lunar elements — simplified Keplerian for visualization */
+const MOON = {
+  // sidereal month
+  n: 1 / 27.321661, // rev / day
+  e: 0.0549,
+  i: 5.145 * Math.PI / 180,
+  // epoch-ish mean elements (approximate, good enough for display)
+  epochMs: Date.UTC(2000, 0, 6, 18, 14), // near a reference new moon
+  raan0: 125.08 * Math.PI / 180,
+  argp0: 318.15 * Math.PI / 180,
+  m0: 135.0 * Math.PI / 180,
+  // RAAN regresses ~19°/year; argp advances ~40°/year
+  raanDot: -0.05295 * Math.PI / 180, // rad / day
+  argpDot: 0.11140 * Math.PI / 180
+};
+
+function moonState(date = new Date()) {
+  const days = (date.getTime() - MOON.epochMs) / 86400000;
+  const raan = MOON.raan0 + MOON.raanDot * days;
+  const argp = MOON.argp0 + MOON.argpDot * days;
+  let M = (MOON.m0 + MOON.n * 2 * Math.PI * days) % (2 * Math.PI);
+  if (M < 0) M += 2 * Math.PI;
+  const E = solveE(M, MOON.e);
+  const cosE = Math.cos(E), sinE = Math.sin(E);
+  const nu = Math.atan2(Math.sqrt(1 - MOON.e * MOON.e) * sinE, cosE - MOON.e);
+  // unit direction in orbital plane → ECI-ish → lat/lon via same GMST path as sats
+  const x_p = Math.cos(nu);
+  const y_p = Math.sin(nu);
+  const cw = Math.cos(argp), sw = Math.sin(argp);
+  const ci = Math.cos(MOON.i), si = Math.sin(MOON.i);
+  const cO = Math.cos(raan), sO = Math.sin(raan);
+  const x1 = cw * x_p - sw * y_p;
+  const y1 = sw * x_p + cw * y_p;
+  const xEci = cO * x1 - sO * ci * y1;
+  const yEci = sO * x1 + cO * ci * y1;
+  const zEci = si * y1;
+  const jd = date.getTime() / 86400000 + 2440587.5;
+  const T = (jd - 2451545.0) / 36525;
+  let gmst = 280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * T * T;
+  gmst = ((gmst % 360) + 360) % 360 * Math.PI / 180;
+  const cg = Math.cos(gmst), sg = Math.sin(gmst);
+  const x = cg * xEci + sg * yEci;
+  const y = -sg * xEci + cg * yEci;
+  const z = zEci;
+  const lon = Math.atan2(y, x) * 180 / Math.PI;
+  const hyp = Math.sqrt(x * x + y * y);
+  const lat = Math.atan2(z, hyp) * 180 / Math.PI;
+  // phase: angle Sun–Moon (approx from mean anomaly vs solar longitude)
+  const sunLon = (280.46 + 0.9856474 * days) * Math.PI / 180;
+  const moonLonEcl = Math.atan2(yEci, xEci); // rough
+  let phase = ((moonLonEcl - sunLon) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+  return { lon, lat, phase, nu };
+}
+
+function drawMoon() {
+  if (!projection) return;
+  const now = new Date();
+  const dpr = canvasPixelRatio();
+  // Visual radius just outside Earth disc (not true scale — true Moon is ~60 Re)
+  const altFactor = 1.42;
+  const periodMs = 27.321661 * 86400000;
+  const samples = perfMode ? 40 : 72;
+  const past = [], future = [];
+  for (let i = -samples; i <= samples; i++) {
+    const t = new Date(now.getTime() + (i / samples) * (periodMs * 0.45));
+    const st = moonState(t);
+    const p = projectAlt(st.lon, st.lat, altFactor);
+    if (!p) {
+      if (i < 0) past.push(null); else future.push(null);
+      continue;
+    }
+    if (i < 0) past.push(p);
+    else if (i > 0) future.push(p);
+    else { past.push(p); future.push(p); }
+  }
+  const strokePath = (pts, color, width) => {
+    mapCtx.beginPath();
+    let pen = false;
+    for (const p of pts) {
+      if (!p) { pen = false; continue; }
+      if (!pen) { mapCtx.moveTo(p[0], p[1]); pen = true; }
+      else mapCtx.lineTo(p[0], p[1]);
+    }
+    mapCtx.strokeStyle = color;
+    mapCtx.lineWidth = width * dpr;
+    mapCtx.stroke();
+  };
+  strokePath(future, 'rgba(220, 225, 240, 0.22)', 1.2);
+  strokePath(past, 'rgba(230, 235, 255, 0.55)', 1.6);
+
+  const cur = moonState(now);
+  const sp = projectAlt(cur.lon, cur.lat, altFactor);
+  if (!sp) return;
+  const R = 9 * dpr;
+  // Moon disc
+  mapCtx.beginPath();
+  mapCtx.arc(sp[0], sp[1], R, 0, Math.PI * 2);
+  mapCtx.fillStyle = '#e8e6de';
+  mapCtx.fill();
+  // Phase shadow (simple terminator across disc)
+  mapCtx.save();
+  mapCtx.beginPath();
+  mapCtx.arc(sp[0], sp[1], R, 0, Math.PI * 2);
+  mapCtx.clip();
+  const phase = cur.phase; // 0 new → π full → 2π new
+  // Illuminate right side when waxing; offset shadow center
+  const illum = (1 - Math.cos(phase)) / 2; // 0..1
+  const shadowDir = Math.sin(phase) >= 0 ? 1 : -1;
+  const offset = (1 - illum) * R * 1.6 * shadowDir;
+  mapCtx.beginPath();
+  mapCtx.arc(sp[0] - offset, sp[1], R * 1.05, 0, Math.PI * 2);
+  mapCtx.fillStyle = 'rgba(8, 12, 24, 0.82)';
+  mapCtx.fill();
+  mapCtx.restore();
+  // Rim
+  mapCtx.beginPath();
+  mapCtx.arc(sp[0], sp[1], R, 0, Math.PI * 2);
+  mapCtx.strokeStyle = 'rgba(255, 255, 240, 0.55)';
+  mapCtx.lineWidth = 1.2 * dpr;
+  mapCtx.stroke();
+  if (!perfMode) {
+    mapCtx.font = `bold ${10 * dpr}px JetBrains Mono, monospace`;
+    mapCtx.fillStyle = 'rgba(230, 235, 255, 0.9)';
+    mapCtx.fillText('Moon', sp[0] + R + 4 * dpr, sp[1] - 2 * dpr);
+  }
+}
+
 function drawMap() {
   const w = mapCanvas.width, h = mapCanvas.height;
   const dpr = canvasPixelRatio();
   mapCtx.clearRect(0, 0, w, h);
 
-  // subtle starfield (fewer stars in perf mode)
-  const starN = perfMode ? 24 : 80;
-  mapCtx.fillStyle = 'rgba(180,200,255,0.35)';
-  for (let i = 0; i < starN; i++) {
-    const x = (i * 97 + mapRotation * 3) % w;
-    const y = (i * 53) % h;
-    mapCtx.fillRect(x, y, 1.2, 1.2);
-  }
+  drawMilkyWay(w, h, dpr);
 
   if (!projection) return;
   if (!paused) mapRotation = (mapRotation + (perfMode ? 0.07 : 0.04)) % 360;
@@ -2267,6 +2459,7 @@ function drawMap() {
   });
 
   drawTrackedSats();
+  drawMoon();
 }
 
 /* ─── Tracked satellites (simplified Keplerian from public TLEs) ─── */
