@@ -104,7 +104,7 @@ html, body {
 #wxPanel {
   position: absolute;
   top: 96px; left: 16px;
-  width: 280px;
+  width: 300px;
   z-index: 15;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -154,24 +154,87 @@ html, body {
   margin-bottom: 4px;
   font-weight: 600;
 }
+.wxLocBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.wxLocBar .panelTitle {
+  margin-bottom: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wxChangeBtn {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: rgba(62, 230, 255, 0.1);
+  border: 1px solid rgba(62, 230, 255, 0.35);
+  color: var(--cyan);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.wxChangeBtn:hover { background: rgba(62, 230, 255, 0.2); }
+.wxSearchWrap {
+  display: none;
+  margin: 6px 0 10px;
+}
+.wxSearchWrap.open { display: block; }
+.wxSearchWrap input {
+  width: 100%;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 7px 10px;
+  outline: none;
+}
+.wxSearchWrap input:focus { border-color: var(--cyan); }
+.wxSearchResults {
+  margin-top: 4px;
+  max-height: 140px;
+  overflow-y: auto;
+  border-radius: 6px;
+  background: rgba(0,0,0,0.4);
+}
+.wxSearchHit {
+  padding: 7px 10px;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-family: var(--mono);
+}
+.wxSearchHit:hover { background: rgba(62, 230, 255, 0.12); }
+.wxSearchHit .sub { color: var(--faint); font-size: 10px; }
 .wxForecast {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 .wxDay {
   display: grid;
-  grid-template-columns: 36px 1fr 52px 44px;
-  gap: 6px;
+  grid-template-columns: 34px 22px 1fr 36px 40px 36px;
+  gap: 4px;
   align-items: center;
   font-family: var(--mono);
   font-size: 11px;
   color: var(--dim);
-  padding: 4px 0;
+  padding: 5px 0;
   border-top: 1px solid rgba(255,255,255,0.04);
 }
 .wxDay .dname { color: var(--ink); font-weight: 600; }
-.wxDay .cond { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wxDay .icon { font-size: 14px; text-align: center; line-height: 1; }
+.wxDay .cond { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.wxDay .pop { color: var(--cyan); text-align: right; font-size: 10px; }
 .wxDay .hi { color: var(--amber); text-align: right; }
 .wxDay .lo { color: var(--cyan); text-align: right; }
 
@@ -353,12 +416,12 @@ html, body {
 /* Bottom panels */
 #bottomRow {
   position: absolute;
-  bottom: 52px; left: 310px; right: 310px;
-  display: flex; gap: 10px;
+  bottom: 52px; left: 330px; right: 310px;
+  display: flex; gap: 8px;
   z-index: 15;
   align-items: stretch;
   flex-wrap: wrap;
-  max-height: calc(100vh - 160px);
+  max-height: min(280px, calc(100vh - 150px));
   overflow-y: auto;
   pointer-events: none;
 }
@@ -370,13 +433,83 @@ html, body {
   padding: 10px 12px;
   backdrop-filter: blur(12px);
   min-width: 0;
-  max-height: 220px;
+  max-height: 240px;
   overflow-y: auto;
 }
-.card.rig { width: 140px; flex: 0 0 140px; }
-.card.space { width: 160px; flex: 0 0 160px; }
-.card.passes { flex: 1 1 220px; min-width: 200px; max-width: 320px; }
-.card.bands { flex: 1 1 200px; min-width: 180px; }
+.card.rig { width: 130px; flex: 0 0 130px; }
+.card.space { width: 150px; flex: 0 0 150px; }
+.card.passes { flex: 1 1 200px; min-width: 180px; max-width: 280px; }
+.card.bands { flex: 1 1 180px; min-width: 160px; max-width: 260px; }
+.card.countdown { flex: 1 1 240px; min-width: 220px; max-width: 300px; }
+.card.celestial { flex: 1 1 240px; min-width: 220px; max-width: 320px; }
+.cdTarget {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--amber);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.cdDigits {
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--cyan);
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+.cdDigits span { color: var(--faint); font-weight: 500; font-size: 11px; margin: 0 2px; }
+.cdDate {
+  font-size: 10px;
+  color: var(--faint);
+  margin-top: 4px;
+  font-family: var(--mono);
+}
+.cdControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+.cdControls select,
+.cdControls input,
+.cdControls button {
+  font-family: var(--mono);
+  font-size: 10px;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  border-radius: 5px;
+  padding: 4px 6px;
+  outline: none;
+}
+.cdControls select { max-width: 100%; flex: 1 1 120px; }
+.cdControls input[type="datetime-local"] { flex: 1 1 140px; min-width: 0; }
+.cdControls button {
+  cursor: pointer;
+  color: var(--cyan);
+  border-color: rgba(62,230,255,0.35);
+  background: rgba(62,230,255,0.1);
+  flex-shrink: 0;
+}
+.cdControls button:hover { background: rgba(62,230,255,0.2); }
+.cdCustomRow { display: none; width: 100%; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.cdCustomRow.open { display: flex; }
+.celRow {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  padding: 4px 0;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  line-height: 1.3;
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 6px;
+}
+.celRow:first-child { border-top: none; }
+.celRow .when { color: var(--amber); font-weight: 600; }
+.celRow .what { color: var(--ink); }
+.celRow .kind { color: var(--cyan); font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; }
+.celList { max-height: 150px; overflow-y: auto; }
 .satRow {
   font-family: var(--mono);
   font-size: 10px;
@@ -664,7 +797,7 @@ html, body {
 @media (max-height: 820px) and (min-width: 1101px) {
   #wxPanel {
     max-height: calc(100vh - 230px);
-    width: 250px;
+    width: 290px;
   }
   #radarPanel { width: 160px; height: 160px; }
   #activityPanel {
@@ -673,12 +806,12 @@ html, body {
     max-height: calc(100vh - 320px);
   }
   #bottomRow {
-    left: 280px;
+    left: 320px;
     right: 280px;
   }
   .card { max-height: 160px; }
   .wxWear { display: none; }
-  .wxForecast .wxDay:nth-child(n+4) { display: none; }
+  .wxForecast .wxDay:nth-child(n+5) { display: none; }
   .ramList { max-height: 72px; }
 }
 
@@ -822,7 +955,14 @@ html, body {
   <button id="setupBtn" title="Setup (S)">⚙</button>
 
   <div id="wxPanel">
-    <div class="panelTitle">Weather · Grand Beach MB</div>
+    <div class="wxLocBar">
+      <div class="panelTitle" id="wxPanelTitle">Weather · Grand Beach, MB</div>
+      <button type="button" class="wxChangeBtn" id="wxChangeBtn" title="Change city">Change</button>
+    </div>
+    <div class="wxSearchWrap" id="wxSearchWrap">
+      <input type="text" id="wxCityInput" placeholder="City name (e.g. Tokyo, London, Winnipeg)" autocomplete="off" />
+      <div class="wxSearchResults" id="wxSearchResults"></div>
+    </div>
     <div class="wxNow" id="wxPanelTemp">—°</div>
     <div class="wxNowSub" id="wxPanelCond">Loading…</div>
     <div class="wxMeta">
@@ -834,7 +974,7 @@ html, body {
       <div>Feels <strong id="wxFeels">—</strong></div>
     </div>
     <div class="wxWear">
-      <div class="label">What to wear · Grand Beach</div>
+      <div class="label" id="wxWearLabel">What to wear</div>
       <div id="wxWearText">Checking conditions…</div>
     </div>
     <div class="panelTitle">7-day forecast</div>
@@ -917,6 +1057,38 @@ html, body {
         <span id="bandPeriod" style="color:var(--faint)">—</span>
       </div>
     </div>
+    <div class="card countdown">
+      <div class="label">Countdown</div>
+      <div class="cdTarget" id="cdTargetName">Spring equinox</div>
+      <div class="cdDigits" id="cdDigits">—</div>
+      <div class="cdDate" id="cdDate">—</div>
+      <div class="cdControls">
+        <select id="cdPreset" title="Target event">
+          <option value="spring">Spring equinox</option>
+          <option value="summer">Summer solstice</option>
+          <option value="autumn">Autumn equinox</option>
+          <option value="winter">Winter solstice</option>
+          <option value="ny">New Year</option>
+          <option value="valentine">Valentine's Day</option>
+          <option value="canada">Canada Day</option>
+          <option value="july4">Independence Day (US)</option>
+          <option value="halloween">Halloween</option>
+          <option value="christmas">Christmas</option>
+          <option value="custom">Custom date/time…</option>
+        </select>
+        <div class="cdCustomRow" id="cdCustomRow">
+          <input type="text" id="cdCustomName" placeholder="Event name" maxlength="40" />
+          <input type="datetime-local" id="cdCustomWhen" />
+          <button type="button" id="cdCustomSet">Set</button>
+        </div>
+      </div>
+    </div>
+    <div class="card celestial">
+      <div class="label">Upcoming celestial</div>
+      <div class="celList" id="celList">
+        <div class="celRow"><span class="when">…</span><span class="what">Loading…</span></div>
+      </div>
+    </div>
   </div>
 
   <div id="dxTicker">
@@ -973,8 +1145,22 @@ const DEFAULTS = {
   tz: 'America/Winnipeg'
 };
 
-/* Grand Beach fixed coords for the dedicated weather panel */
-const GRAND_BEACH = { lat: 50.55, lon: -96.65, tz: 'America/Winnipeg', name: 'Grand Beach, MB' };
+/* Weather panel location (any city) — defaults to Grand Beach, MB */
+const DEFAULT_WX = { name: 'Grand Beach, MB', lat: 50.55, lon: -96.65, tz: 'America/Winnipeg', country: 'Canada' };
+function loadWxLoc() {
+  try {
+    const raw = localStorage.getItem('hmc_wx_loc');
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && typeof o.lat === 'number' && typeof o.lon === 'number' && o.name) return o;
+    }
+  } catch (e) {}
+  return { ...DEFAULT_WX };
+}
+function saveWxLoc(loc) {
+  localStorage.setItem('hmc_wx_loc', JSON.stringify(loc));
+}
+let wxLoc = loadWxLoc();
 
 let station = loadStation();
 let onAir = false;
@@ -1140,6 +1326,8 @@ function applyStation() {
   document.getElementById('tzLabel').textContent = station.tz.split('/').pop().replace(/_/g, ' ');
   document.title = station.call + ' Mission Control';
   if (typeof updateSatPanel === 'function') updateSatPanel();
+  if (typeof renderCelestial === 'function') renderCelestial();
+  if (typeof tickCountdown === 'function') tickCountdown();
 }
 
 /* ─── Clocks ─── */
@@ -1162,16 +1350,38 @@ function tickClocks() {
   }
 }
 
-/* ─── Weather (Open-Meteo) — station strip + Grand Beach panel ─── */
+/* ─── Weather (Open-Meteo) — station strip + selectable city panel ─── */
 function weatherCode(c) {
   if (c === 0) return 'Clear';
-  if (c <= 3) return 'Partly cloudy';
+  if (c === 1) return 'Mainly clear';
+  if (c === 2) return 'Partly cloudy';
+  if (c === 3) return 'Overcast';
   if (c <= 48) return 'Fog';
-  if (c <= 67) return 'Rain';
+  if (c <= 55) return 'Drizzle';
+  if (c <= 57) return 'Freezing drizzle';
+  if (c <= 65) return 'Rain';
+  if (c <= 67) return 'Freezing rain';
   if (c <= 77) return 'Snow';
   if (c <= 82) return 'Showers';
+  if (c <= 86) return 'Snow showers';
   if (c <= 99) return 'Thunderstorm';
   return '—';
+}
+function weatherIcon(c) {
+  if (c === 0) return '☀️';
+  if (c === 1) return '🌤️';
+  if (c === 2) return '⛅';
+  if (c === 3) return '☁️';
+  if (c <= 48) return '🌫️';
+  if (c <= 55) return '🌦️';
+  if (c <= 57) return '🌧️';
+  if (c <= 65) return '🌧️';
+  if (c <= 67) return '🌧️';
+  if (c <= 77) return '🌨️';
+  if (c <= 82) return '🌦️';
+  if (c <= 86) return '🌨️';
+  if (c <= 99) return '⛈️';
+  return '🌡️';
 }
 function windDir(deg) {
   const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
@@ -1185,7 +1395,6 @@ function format12(hm) {
   return h + ':' + pad(m) + ' ' + ap;
 }
 function moonPhaseName(date = new Date()) {
-  // Approximate synodic month from a known new moon (2000-01-06)
   const knownNew = Date.UTC(2000, 0, 6, 18, 14);
   const age = ((date.getTime() - knownNew) / 86400000) % 29.53058867;
   const a = age < 0 ? age + 29.53058867 : age;
@@ -1199,13 +1408,13 @@ function moonPhaseName(date = new Date()) {
   if (a < 27.68) return '🌘 Waning crescent';
   return '🌑 New';
 }
-function wearAdvice(tempC, windKmh, code, humidity) {
+function wearAdvice(tempC, windKmh, code, humidity, placeName) {
   const feels = tempC - (windKmh > 15 ? Math.min(6, (windKmh - 15) * 0.15) : 0);
-  const rainy = code >= 51 && code <= 67 || code >= 80 && code <= 82;
-  const snowy = code >= 71 && code <= 77 || code >= 85 && code <= 86;
+  const rainy = (code >= 51 && code <= 67) || (code >= 80 && code <= 82);
+  const snowy = (code >= 71 && code <= 77) || (code >= 85 && code <= 86);
   const parts = [];
   if (feels <= -10) {
-    parts.push('Heavy winter coat, insulated layers, toque, gloves, scarf, and winter boots.');
+    parts.push('Heavy winter coat, insulated layers, hat, gloves, scarf, and winter boots.');
   } else if (feels <= 0) {
     parts.push('Warm insulated jacket, sweater, long pants, closed shoes or boots, and a hat.');
   } else if (feels <= 8) {
@@ -1214,17 +1423,99 @@ function wearAdvice(tempC, windKmh, code, humidity) {
     parts.push('Light jacket or fleece, long pants or jeans, and closed shoes.');
   } else if (feels <= 22) {
     parts.push('Long sleeves or a light sweater; pants or jeans are fine.');
-  } else {
+  } else if (feels <= 28) {
     parts.push('T-shirt or light shirt; shorts or light pants if you prefer.');
+  } else {
+    parts.push('Very light clothing; stay hydrated and seek shade when possible.');
   }
-  if (windKmh >= 25) parts.push('Lake wind is strong — add a windproof outer layer.');
-  else if (windKmh >= 15) parts.push('Breezy off the lake — a windbreaker helps.');
-  if (rainy) parts.push('Bring a waterproof shell; pavement and paths may be wet.');
+  if (windKmh >= 30) parts.push('Strong wind — add a windproof outer layer.');
+  else if (windKmh >= 18) parts.push('Breezy — a windbreaker helps.');
+  if (rainy) parts.push('Bring a waterproof shell; surfaces may be wet.');
   if (snowy) parts.push('Expect snow underfoot — boots with grip.');
-  if (humidity >= 85 && feels <= 10) parts.push('Damp cold near the shore — layer up more than the number suggests.');
-  parts.push('Grand Beach in early November is cool and exposed; skip summer beach wear.');
+  if (humidity >= 85 && feels <= 10) parts.push('Damp cold — layer up more than the number suggests.');
+  if (humidity >= 80 && feels >= 26) parts.push('Humid heat — light, breathable fabrics.');
+  if (placeName) parts.push('Advice for ' + placeName + '.');
   return parts.join(' ');
 }
+
+function updateWxTitle() {
+  const t = document.getElementById('wxPanelTitle');
+  if (t) t.textContent = 'Weather · ' + (wxLoc.name || '—');
+  const wl = document.getElementById('wxWearLabel');
+  if (wl) wl.textContent = 'What to wear · ' + (wxLoc.name || '').split(',')[0];
+}
+
+async function searchCities(q) {
+  const box = document.getElementById('wxSearchResults');
+  if (!q || q.trim().length < 2) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = '<div class="wxSearchHit"><span class="sub">Searching…</span></div>';
+  try {
+    const url = 'https://geocoding-api.open-meteo.com/v1/search?name=' +
+      encodeURIComponent(q.trim()) + '&count=6&language=en&format=json';
+    const r = await fetch(url);
+    const d = await r.json();
+    if (!d.results || !d.results.length) {
+      box.innerHTML = '<div class="wxSearchHit"><span class="sub">No matches</span></div>';
+      return;
+    }
+    box.innerHTML = d.results.map((hit, i) => {
+      const label = [hit.name, hit.admin1, hit.country].filter(Boolean).join(', ');
+      return `<div class="wxSearchHit" data-idx="${i}">${label}
+        <div class="sub">${hit.latitude.toFixed(2)}°, ${hit.longitude.toFixed(2)}°</div></div>`;
+    }).join('');
+    box.querySelectorAll('.wxSearchHit[data-idx]').forEach(el => {
+      el.addEventListener('click', () => {
+        const hit = d.results[parseInt(el.dataset.idx, 10)];
+        wxLoc = {
+          name: [hit.name, hit.admin1, hit.country].filter(Boolean).join(', '),
+          lat: hit.latitude,
+          lon: hit.longitude,
+          tz: hit.timezone || 'auto',
+          country: hit.country || ''
+        };
+        saveWxLoc(wxLoc);
+        document.getElementById('wxSearchWrap').classList.remove('open');
+        document.getElementById('wxCityInput').value = '';
+        box.innerHTML = '';
+        updateWxTitle();
+        fetchWeather();
+        showToast('Weather → ' + wxLoc.name);
+      });
+    });
+  } catch (e) {
+    box.innerHTML = '<div class="wxSearchHit"><span class="sub">Search failed</span></div>';
+  }
+}
+
+function initWxCityPicker() {
+  const btn = document.getElementById('wxChangeBtn');
+  const wrap = document.getElementById('wxSearchWrap');
+  const input = document.getElementById('wxCityInput');
+  let timer = null;
+  btn.addEventListener('click', () => {
+    wrap.classList.toggle('open');
+    if (wrap.classList.contains('open')) {
+      input.focus();
+      input.select();
+    }
+  });
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => searchCities(input.value), 320);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      wrap.classList.remove('open');
+      input.value = '';
+      document.getElementById('wxSearchResults').innerHTML = '';
+    }
+  });
+  updateWxTitle();
+}
+
 async function fetchWeather() {
   try {
     // Top bar: station location
@@ -1245,10 +1536,13 @@ async function fetchWeather() {
     document.getElementById('wxCond').textContent = 'Weather unavailable';
   }
 
-  // Grand Beach dedicated panel
+  // Selectable city weather panel
   try {
-    const gb = GRAND_BEACH;
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${gb.lat}&longitude=${gb.lon}&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,relative_humidity_2m,apparent_temperature&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,weather_code,precipitation_sum,wind_speed_10m_max&timezone=${encodeURIComponent(gb.tz)}&temperature_unit=celsius&wind_speed_unit=kmh&forecast_days=7`;
+    const tz = wxLoc.tz && wxLoc.tz !== 'auto' ? wxLoc.tz : 'auto';
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${wxLoc.lat}&longitude=${wxLoc.lon}` +
+      `&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,relative_humidity_2m,apparent_temperature` +
+      `&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset,weather_code,precipitation_sum,precipitation_probability_max,wind_speed_10m_max` +
+      `&timezone=${encodeURIComponent(tz)}&temperature_unit=celsius&wind_speed_unit=kmh&forecast_days=7`;
     const r = await fetch(url);
     const d = await r.json();
     const cur = d.current;
@@ -1259,9 +1553,11 @@ async function fetchWeather() {
     const wind = Math.round(cur.wind_speed_10m);
     const hum = Math.round(cur.relative_humidity_2m);
 
+    updateWxTitle();
     document.getElementById('wxPanelTemp').textContent = temp + '°C';
     document.getElementById('wxPanelCond').textContent =
-      cond + ' · feels ' + feels + '°C · ' + windDir(cur.wind_direction_10m) + ' ' + wind + ' km/h';
+      weatherIcon(cur.weather_code) + ' ' + cond + ' · feels ' + feels + '°C · ' +
+      windDir(cur.wind_direction_10m) + ' ' + wind + ' km/h';
     document.getElementById('wxSunrise').textContent = format12((day.sunrise[0] || '').slice(11, 16));
     document.getElementById('wxSunset').textContent = format12((day.sunset[0] || '').slice(11, 16));
     document.getElementById('wxMoon').textContent = moonPhaseName();
@@ -1269,7 +1565,7 @@ async function fetchWeather() {
     document.getElementById('wxHum').textContent = hum + '%';
     document.getElementById('wxFeels').textContent = feels + '°C';
     document.getElementById('wxWearText').textContent =
-      wearAdvice(cur.temperature_2m, cur.wind_speed_10m, cur.weather_code, cur.relative_humidity_2m);
+      wearAdvice(cur.temperature_2m, cur.wind_speed_10m, cur.weather_code, cur.relative_humidity_2m, wxLoc.name);
 
     const names = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     let html = '';
@@ -1278,18 +1574,25 @@ async function fetchWeather() {
       const label = i === 0 ? 'Today' : names[dt.getDay()];
       const hi = Math.round(day.temperature_2m_max[i]);
       const lo = Math.round(day.temperature_2m_min[i]);
-      const wc = weatherCode(day.weather_code[i]);
+      const code = day.weather_code[i];
+      const wc = weatherCode(code);
+      const icon = weatherIcon(code);
+      const popArr = day.precipitation_probability_max;
+      const pop = popArr && popArr[i] != null ? Math.round(popArr[i]) : null;
+      const popStr = pop != null ? pop + '%' : '—';
       html += `<div class="wxDay">
         <span class="dname">${label}</span>
+        <span class="icon" title="${wc}">${icon}</span>
         <span class="cond">${wc}</span>
+        <span class="pop" title="Chance of precipitation">${popStr}</span>
         <span class="hi">${hi}°</span>
         <span class="lo">${lo}°</span>
       </div>`;
     }
     document.getElementById('wxForecast').innerHTML = html;
   } catch (e) {
-    document.getElementById('wxPanelCond').textContent = 'Grand Beach weather unavailable';
-    document.getElementById('wxWearText').textContent = 'Could not load conditions. Dress in layers for a cool Manitoba lakeshore.';
+    document.getElementById('wxPanelCond').textContent = 'Weather unavailable for this city';
+    document.getElementById('wxWearText').textContent = 'Could not load conditions. Try another city or check your connection.';
   }
 }
 
@@ -2266,10 +2569,261 @@ function frame() {
 }
 
 /* ─── Boot ─── */
+/* ─── Countdown + celestial events ─── */
+/* Meeus approximate equinox / solstice (UTC Date) */
+function equinoxSolsticeUTC(year, which) {
+  // which: 0 Mar equinox, 1 Jun solstice, 2 Sep equinox, 3 Dec solstice
+  const Y = (year - 2000) / 1000;
+  let JDE0;
+  if (which === 0) {
+    JDE0 = 2451623.80984 + 365242.37404 * Y + 0.05169 * Y * Y - 0.00411 * Y * Y * Y - 0.00057 * Y * Y * Y * Y;
+  } else if (which === 1) {
+    JDE0 = 2451716.56767 + 365241.62603 * Y + 0.00325 * Y * Y + 0.00888 * Y * Y * Y - 0.00030 * Y * Y * Y * Y;
+  } else if (which === 2) {
+    JDE0 = 2451810.21715 + 365242.01767 * Y - 0.11575 * Y * Y + 0.00337 * Y * Y * Y + 0.00078 * Y * Y * Y * Y;
+  } else {
+    JDE0 = 2451900.05952 + 365242.74049 * Y - 0.06223 * Y * Y - 0.00823 * Y * Y * Y + 0.00032 * Y * Y * Y * Y;
+  }
+  const T = (JDE0 - 2451545.0) / 36525;
+  const W = 35999.373 * T - 2.47;
+  const dL = 1 + 0.0334 * Math.cos(W * Math.PI / 180) + 0.0007 * Math.cos(2 * W * Math.PI / 180);
+  const S = 485 * Math.cos((324.96 + 1934.136 * T) * Math.PI / 180)
+    + 203 * Math.cos((337.23 + 32964.467 * T) * Math.PI / 180)
+    + 199 * Math.cos((342.08 + 20.186 * T) * Math.PI / 180)
+    + 182 * Math.cos((27.85 + 445267.112 * T) * Math.PI / 180)
+    + 156 * Math.cos((73.14 + 450368.67 * T) * Math.PI / 180)
+    + 136 * Math.cos((171.33 + 22518.754 * T) * Math.PI / 180)
+    + 77 * Math.cos((222.92 + 65928.934 * T) * Math.PI / 180)
+    + 74 * Math.cos((288.79 + 3034.906 * T) * Math.PI / 180)
+    + 70 * Math.cos((57.13 + 9038.029 * T) * Math.PI / 180)
+    + 58 * Math.cos((199.07 + 33718.313 * T) * Math.PI / 180);
+  const JDE = JDE0 + (0.00001 * S) / dL;
+  // Julian → JS Date (UTC)
+  const a = JDE + 0.5;
+  const Z = Math.floor(a);
+  const F = a - Z;
+  let A = Z;
+  if (Z >= 2299161) {
+    const alpha = Math.floor((Z - 1867216.25) / 36524.25);
+    A = Z + 1 + alpha - Math.floor(alpha / 4);
+  }
+  const B = A + 1524;
+  const C = Math.floor((B - 122.1) / 365.25);
+  const D = Math.floor(365.25 * C);
+  const E = Math.floor((B - D) / 30.6001);
+  const day = B - D - Math.floor(30.6001 * E) + F;
+  const month = E < 14 ? E - 1 : E - 13;
+  const yearOut = month > 2 ? C - 4716 : C - 4715;
+  const dayInt = Math.floor(day);
+  const frac = day - dayInt;
+  const ms = frac * 86400000;
+  return new Date(Date.UTC(yearOut, month - 1, dayInt) + ms);
+}
+
+function nextEquinoxSolstice(which) {
+  const now = new Date();
+  let y = now.getUTCFullYear();
+  let d = equinoxSolsticeUTC(y, which);
+  if (d.getTime() <= now.getTime()) d = equinoxSolsticeUTC(y + 1, which);
+  return d;
+}
+
+function nextFixedHoliday(month, day) {
+  const now = new Date();
+  let y = now.getFullYear();
+  let d = new Date(y, month - 1, day, 0, 0, 0);
+  if (d.getTime() <= now.getTime()) d = new Date(y + 1, month - 1, day, 0, 0, 0);
+  return d;
+}
+
+const CD_PRESETS = {
+  spring: { name: 'Spring equinox', get: () => nextEquinoxSolstice(0) },
+  summer: { name: 'Summer solstice', get: () => nextEquinoxSolstice(1) },
+  autumn: { name: 'Autumn equinox', get: () => nextEquinoxSolstice(2) },
+  winter: { name: 'Winter solstice', get: () => nextEquinoxSolstice(3) },
+  ny: { name: "New Year's Day", get: () => nextFixedHoliday(1, 1) },
+  valentine: { name: "Valentine's Day", get: () => nextFixedHoliday(2, 14) },
+  canada: { name: 'Canada Day', get: () => nextFixedHoliday(7, 1) },
+  july4: { name: 'Independence Day (US)', get: () => nextFixedHoliday(7, 4) },
+  halloween: { name: 'Halloween', get: () => nextFixedHoliday(10, 31) },
+  christmas: { name: 'Christmas', get: () => nextFixedHoliday(12, 25) }
+};
+
+function loadCountdown() {
+  try {
+    const raw = localStorage.getItem('hmc_countdown');
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return { preset: 'spring', customName: '', customWhen: null };
+}
+function saveCountdown(cfg) {
+  localStorage.setItem('hmc_countdown', JSON.stringify(cfg));
+}
+let cdCfg = loadCountdown();
+
+function getCountdownTarget() {
+  if (cdCfg.preset === 'custom' && cdCfg.customWhen) {
+    return {
+      name: cdCfg.customName || 'Custom event',
+      date: new Date(cdCfg.customWhen)
+    };
+  }
+  const p = CD_PRESETS[cdCfg.preset] || CD_PRESETS.spring;
+  return { name: p.name, date: p.get() };
+}
+
+function formatCountdown(ms) {
+  if (ms <= 0) return 'NOW';
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return d + '<span>d</span> ' + pad(h) + '<span>h</span> ' + pad(m) + '<span>m</span> ' + pad(sec) + '<span>s</span>';
+}
+
+function tickCountdown() {
+  const t = getCountdownTarget();
+  const elName = document.getElementById('cdTargetName');
+  const elDigits = document.getElementById('cdDigits');
+  const elDate = document.getElementById('cdDate');
+  if (!elDigits) return;
+  elName.textContent = t.name;
+  const ms = t.date.getTime() - Date.now();
+  elDigits.innerHTML = formatCountdown(ms);
+  try {
+    elDate.textContent = t.date.toLocaleString(undefined, {
+      timeZone: station.tz || undefined,
+      weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
+    });
+  } catch (e) {
+    elDate.textContent = t.date.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+  }
+}
+
+function initCountdown() {
+  const sel = document.getElementById('cdPreset');
+  const row = document.getElementById('cdCustomRow');
+  const nameIn = document.getElementById('cdCustomName');
+  const whenIn = document.getElementById('cdCustomWhen');
+  const setBtn = document.getElementById('cdCustomSet');
+  if (!sel) return;
+
+  if (cdCfg.preset && (CD_PRESETS[cdCfg.preset] || cdCfg.preset === 'custom')) {
+    sel.value = cdCfg.preset;
+  } else {
+    cdCfg.preset = 'spring';
+  }
+  if (cdCfg.preset === 'custom') {
+    row.classList.add('open');
+    if (cdCfg.customName) nameIn.value = cdCfg.customName;
+    if (cdCfg.customWhen) {
+      // datetime-local needs local form YYYY-MM-DDTHH:mm
+      const d = new Date(cdCfg.customWhen);
+      const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+      whenIn.value = local.toISOString().slice(0, 16);
+    }
+  }
+
+  sel.addEventListener('change', () => {
+    if (sel.value === 'custom') {
+      row.classList.add('open');
+      cdCfg.preset = 'custom';
+    } else {
+      row.classList.remove('open');
+      cdCfg.preset = sel.value;
+      cdCfg.customWhen = null;
+      saveCountdown(cdCfg);
+      tickCountdown();
+    }
+  });
+  setBtn.addEventListener('click', () => {
+    const name = (nameIn.value || 'Custom event').trim();
+    const when = whenIn.value;
+    if (!when) {
+      showToast('Pick a date & time');
+      return;
+    }
+    cdCfg.preset = 'custom';
+    cdCfg.customName = name;
+    cdCfg.customWhen = new Date(when).toISOString();
+    saveCountdown(cdCfg);
+    tickCountdown();
+    showToast('Countdown → ' + name);
+  });
+  tickCountdown();
+}
+
+/* Known future celestial events (UTC). Filtered to future at render time. */
+const CELESTIAL_EVENTS = [
+  { t: '2026-11-17T12:00:00Z', kind: 'Meteor', what: 'Leonids peak' },
+  { t: '2026-12-14T12:00:00Z', kind: 'Meteor', what: 'Geminids peak' },
+  { t: '2026-12-21T12:00:00Z', kind: 'Solstice', what: 'December solstice' },
+  { t: '2027-01-03T12:00:00Z', kind: 'Meteor', what: 'Quadrantids peak' },
+  { t: '2027-02-06T15:59:00Z', kind: 'Eclipse', what: 'Annular solar eclipse (S. America)' },
+  { t: '2027-02-20T23:12:00Z', kind: 'Eclipse', what: 'Penumbral lunar eclipse' },
+  { t: '2027-03-20T12:00:00Z', kind: 'Equinox', what: 'March equinox' },
+  { t: '2027-04-22T12:00:00Z', kind: 'Meteor', what: 'Lyrids peak' },
+  { t: '2027-05-06T12:00:00Z', kind: 'Meteor', what: 'η-Aquariids peak' },
+  { t: '2027-06-21T12:00:00Z', kind: 'Solstice', what: 'June solstice' },
+  { t: '2027-07-18T16:02:00Z', kind: 'Eclipse', what: 'Penumbral lunar eclipse' },
+  { t: '2027-08-02T10:06:00Z', kind: 'Eclipse', what: 'Total solar eclipse (Spain–Egypt)' },
+  { t: '2027-08-12T12:00:00Z', kind: 'Meteor', what: 'Perseids peak' },
+  { t: '2027-08-17T07:13:00Z', kind: 'Eclipse', what: 'Penumbral lunar eclipse' },
+  { t: '2027-09-22T12:00:00Z', kind: 'Equinox', what: 'September equinox' },
+  { t: '2027-10-21T12:00:00Z', kind: 'Meteor', what: 'Orionids peak' },
+  { t: '2027-11-17T12:00:00Z', kind: 'Meteor', what: 'Leonids peak' },
+  { t: '2027-12-14T12:00:00Z', kind: 'Meteor', what: 'Geminids peak' },
+  { t: '2027-12-21T12:00:00Z', kind: 'Solstice', what: 'December solstice' },
+  { t: '2028-01-12T04:13:00Z', kind: 'Eclipse', what: 'Partial lunar eclipse' },
+  { t: '2028-01-26T15:07:00Z', kind: 'Eclipse', what: 'Annular solar eclipse (Americas–Iberia)' },
+  { t: '2028-04-13T12:00:00Z', kind: 'Asteroid', what: 'Asteroid 99942 Apophis near-Earth approach era (watch windows)' },
+  { t: '2028-07-06T18:19:00Z', kind: 'Eclipse', what: 'Partial lunar eclipse' },
+  { t: '2028-07-22T02:55:00Z', kind: 'Eclipse', what: 'Total solar eclipse (Australia–NZ)' },
+  { t: '2028-12-31T16:51:00Z', kind: 'Eclipse', what: 'Total lunar eclipse' },
+  { t: '2029-04-13T22:00:00Z', kind: 'Asteroid', what: 'Apophis close approach (~31,000 km)' }
+];
+
+function renderCelestial() {
+  const el = document.getElementById('celList');
+  if (!el) return;
+  const now = Date.now();
+  const upcoming = CELESTIAL_EVENTS
+    .map(e => ({ ...e, date: new Date(e.t) }))
+    .filter(e => e.date.getTime() > now - 86400000)
+    .sort((a, b) => a.date - b.date)
+    .slice(0, 12);
+  if (!upcoming.length) {
+    el.innerHTML = '<div class="celRow"><span class="what">No catalogued events ahead</span></div>';
+    return;
+  }
+  el.innerHTML = upcoming.map(e => {
+    let when;
+    try {
+      when = e.date.toLocaleDateString(undefined, {
+        timeZone: station.tz || undefined,
+        month: 'short', day: 'numeric', year: '2-digit'
+      });
+    } catch (err) {
+      when = e.t.slice(0, 10);
+    }
+    return `<div class="celRow">
+      <span class="when">${when}</span>
+      <span class="what"><span class="kind">${e.kind}</span><br>${e.what}</span>
+    </div>`;
+  }).join('');
+}
+
 function boot() {
   applyStation();
   if (!localStorage.getItem('hmc_station')) openSetup();
   else closeSetup();
+
+  initWxCityPicker();
+  initCountdown();
+  renderCelestial();
+  setInterval(tickCountdown, 1000);
 
   tickClocks();
   setInterval(tickClocks, 1000);
