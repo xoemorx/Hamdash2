@@ -1801,40 +1801,54 @@ async function fetchBandConditions() {
     } catch (e) { /* try next proxy */ }
   }
 
-  // Display order matching common HF + 6m
+  // Display: HF bands + 17/12 split out + CB (11m) + 6m
   const order = [
     { key: '80m-40m', label: '80' },
-    { key: '30m-20m', label: '30/20' },
-    { key: '17m-15m', label: '17/15' },
-    { key: '12m-10m', label: '12/10' },
-    { key: '6m', label: '6m' }
+    { key: '80m-40m', label: '40' },
+    { key: '30m-20m', label: '20' },
+    { key: '17m-15m', label: '17' },
+    { key: '17m-15m', label: '15' },
+    { key: '12m-10m', label: '12' },
+    { key: '12m-10m', label: '10' },
+    { key: '6m', label: '6m' },
+    { key: 'cb', label: 'CB' }
   ];
 
-  // HamQSL uses names like "80m-40m", "30m-20m", etc.
   const period = day ? 'day' : 'night';
   const tiles = document.getElementById('bandTiles');
+  const { muf: mufEst, luf: lufEst } = estimateMufLuf(sfi, kp, day, station.lat);
+  // CB (27 MHz) — not in HamQSL; estimate from MUF/LUF like 10/11m
+  const cbCond = (() => {
+    const mhz = 27.2;
+    if (mhz < lufEst) return 'poor';
+    if (mhz > mufEst) return 'poor';
+    if (mhz > mufEst * 0.85) return 'fair';
+    return 'good';
+  })();
   if (bands) {
+    bands['cb'] = { day: cbCond, night: cbCond };
     tiles.innerHTML = order.map(o => {
       const raw = bands[o.key] ? (bands[o.key][period] || bands[o.key].day || bands[o.key].night) : null;
-      const c = normalizeCond(raw);
+      const c = o.key === 'cb' ? cbCond : normalizeCond(raw);
       return `<div class="bandTile ${c}"><div class="bn">${o.label}</div><div class="bc">${condLabel(c)}</div></div>`;
     }).join('');
   } else {
-    // fallback estimate from SFI/Kp alone
     const est = (mhz) => {
-      const { muf, luf } = estimateMufLuf(sfi, kp, day, station.lat);
-      if (mhz < luf) return 'poor';
-      if (mhz > muf) return 'poor';
-      if (mhz > muf * 0.85) return 'fair';
+      if (mhz < lufEst) return 'poor';
+      if (mhz > mufEst) return 'poor';
+      if (mhz > mufEst * 0.85) return 'fair';
       return 'good';
     };
     const fallback = [
       { label: '80', mhz: 3.7 },
       { label: '40', mhz: 7.1 },
       { label: '20', mhz: 14.2 },
+      { label: '17', mhz: 18.1 },
       { label: '15', mhz: 21.2 },
+      { label: '12', mhz: 24.9 },
       { label: '10', mhz: 28.4 },
-      { label: '6m', mhz: 50.1 }
+      { label: '6m', mhz: 50.1 },
+      { label: 'CB', mhz: 27.2 }
     ];
     tiles.innerHTML = fallback.map(b => {
       const c = est(b.mhz);
@@ -2043,7 +2057,7 @@ function toggleOnAir() {
   onAir = !onAir;
   document.getElementById('rigDot').classList.toggle('on', onAir);
   document.getElementById('onAirBtn').classList.toggle('active', onAir);
-  document.getElementById('rigFreq').textContent = onAir ? '14.074 · FT8' : '— · —';
+  document.getElementById('rigFreq').textContent = onAir ? station.call : '— · —';
   if (onAir) showToast(station.call + ' is ON THE AIR');
 }
 document.getElementById('onAirBtn').addEventListener('click', toggleOnAir);
@@ -2579,69 +2593,50 @@ function drawMap() {
   // home QTH
   const home = projection([station.lon, station.lat]);
   if (home) {
+    const dprH = canvasPixelRatio();
+    // ON AIR: radiating elliptical waves (perspective on the sphere) + callsign
+    if (onAir) {
+      const t = Date.now() / 1000;
+      const maxR = Math.min(mapCanvas.width, mapCanvas.height) * 0.11;
+      const nRings = perfMode ? 3 : 4;
+      for (let i = 0; i < nRings; i++) {
+        const phase = (t * 0.55 + i / nRings) % 1;
+        const rad = 8 * dprH + phase * maxR;
+        const alpha = (1 - phase) * 0.55;
+        // Flatten Y for a 3D “sitting on the globe” look
+        const ry = rad * 0.42;
+        mapCtx.beginPath();
+        mapCtx.ellipse(home[0], home[1], rad, ry, 0, 0, Math.PI * 2);
+        mapCtx.strokeStyle = `rgba(61, 255, 158, ${alpha})`;
+        mapCtx.lineWidth = (2.2 - phase * 1.2) * dprH;
+        mapCtx.stroke();
+        // secondary cyan rim
+        mapCtx.beginPath();
+        mapCtx.ellipse(home[0], home[1], rad * 0.92, ry * 0.92, 0, 0, Math.PI * 2);
+        mapCtx.strokeStyle = `rgba(62, 230, 255, ${alpha * 0.45})`;
+        mapCtx.lineWidth = 1 * dprH;
+        mapCtx.stroke();
+      }
+      // Callsign label above QTH
+      mapCtx.font = `bold ${13 * dprH}px JetBrains Mono, monospace`;
+      mapCtx.textAlign = 'center';
+      mapCtx.fillStyle = 'rgba(61, 255, 158, 0.95)';
+      mapCtx.shadowColor = 'rgba(61, 255, 158, 0.55)';
+      mapCtx.shadowBlur = 12 * dprH;
+      mapCtx.fillText(station.call || 'ON AIR', home[0], home[1] - 18 * dprH);
+      mapCtx.shadowBlur = 0;
+      mapCtx.textAlign = 'start';
+    }
     mapCtx.beginPath();
     mapCtx.arc(home[0], home[1], 5 * devicePixelRatio, 0, Math.PI * 2);
-    mapCtx.fillStyle = '#ffb627';
+    mapCtx.fillStyle = onAir ? '#3dff9e' : '#ffb627';
     mapCtx.fill();
     mapCtx.beginPath();
     mapCtx.arc(home[0], home[1], 12 * devicePixelRatio, 0, Math.PI * 2);
-    mapCtx.strokeStyle = 'rgba(255,182,39,0.5)';
+    mapCtx.strokeStyle = onAir ? 'rgba(61,255,158,0.55)' : 'rgba(255,182,39,0.5)';
     mapCtx.lineWidth = 1.5 * devicePixelRatio;
     mapCtx.stroke();
   }
-
-  // RAM Manitoba repeaters (front-hemisphere only)
-  const r = projection.rotate();
-  const toRad = Math.PI / 180;
-  const lambda0 = -r[0] * toRad;
-  const phi0 = r[1] * toRad;
-  const cosPhi0 = Math.cos(phi0);
-  const sinPhi0 = Math.sin(phi0);
-  function isFront(lon, lat) {
-    const lambda = lon * toRad - lambda0;
-    const phi = lat * toRad;
-    const cosC = sinPhi0 * Math.sin(phi) + cosPhi0 * Math.cos(phi) * Math.cos(lambda);
-    return cosC > 0.05;
-  }
-  // soft links between nearby RAM sites
-  mapCtx.lineWidth = 1 * devicePixelRatio;
-  for (let i = 0; i < RAM_REPEATERS.length; i++) {
-    for (let j = i + 1; j < RAM_REPEATERS.length; j++) {
-      const a = RAM_REPEATERS[i], b = RAM_REPEATERS[j];
-      const dlat = a.lat - b.lat, dlon = a.lon - b.lon;
-      if (dlat * dlat + dlon * dlon > 1.6) continue; // ~ only local links
-      if (!isFront(a.lon, a.lat) || !isFront(b.lon, b.lat)) continue;
-      const pa = projection([a.lon, a.lat]);
-      const pb = projection([b.lon, b.lat]);
-      if (!pa || !pb) continue;
-      mapCtx.beginPath();
-      mapCtx.moveTo(pa[0], pa[1]);
-      mapCtx.lineTo(pb[0], pb[1]);
-      mapCtx.strokeStyle = 'rgba(196, 245, 66, 0.18)';
-      mapCtx.stroke();
-    }
-  }
-  RAM_REPEATERS.forEach(rep => {
-    if (!isFront(rep.lon, rep.lat)) return;
-    const p = projection([rep.lon, rep.lat]);
-    if (!p) return;
-    const uhf = rep.freq.startsWith('4');
-    mapCtx.beginPath();
-    mapCtx.arc(p[0], p[1], (uhf ? 3.5 : 4.5) * devicePixelRatio, 0, Math.PI * 2);
-    mapCtx.fillStyle = uhf ? '#c4f542' : '#3dff9e';
-    mapCtx.fill();
-    mapCtx.beginPath();
-    mapCtx.arc(p[0], p[1], 8 * devicePixelRatio, 0, Math.PI * 2);
-    mapCtx.strokeStyle = uhf ? 'rgba(196,245,66,0.45)' : 'rgba(61,255,158,0.4)';
-    mapCtx.lineWidth = 1.2 * devicePixelRatio;
-    mapCtx.stroke();
-    // callsign label when globe is somewhat face-on to Manitoba
-    if (isFront(rep.lon, rep.lat)) {
-      mapCtx.font = `${10 * devicePixelRatio}px JetBrains Mono, monospace`;
-      mapCtx.fillStyle = 'rgba(200, 255, 220, 0.9)';
-      mapCtx.fillText(rep.call, p[0] + 7 * devicePixelRatio, p[1] - 4 * devicePixelRatio);
-    }
-  });
 
   // signal arcs / spots
   spots.forEach(s => {
