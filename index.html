@@ -440,8 +440,36 @@ html, body {
 .card.space { width: 150px; flex: 0 0 150px; }
 .card.passes { flex: 1 1 200px; min-width: 180px; max-width: 280px; }
 .card.bands { flex: 1 1 180px; min-width: 160px; max-width: 260px; }
-.card.countdown { flex: 1 1 240px; min-width: 220px; max-width: 300px; }
-.card.celestial { flex: 1 1 240px; min-width: 220px; max-width: 320px; }
+.card.countdown { flex: 1 1 200px; min-width: 180px; max-width: 280px; }
+.card.celestial { flex: 1 1 200px; min-width: 180px; max-width: 280px; }
+.card.solar {
+  flex: 1 1 280px;
+  min-width: 240px;
+  max-width: 360px;
+  max-height: 260px;
+}
+#solarCanvas {
+  width: 100%;
+  height: 120px;
+  display: block;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  margin-top: 4px;
+}
+.roadsterTel {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  line-height: 1.4;
+  margin-top: 6px;
+}
+.roadsterTel strong { color: var(--cyan); font-weight: 600; }
+.roadsterTel .rtitle {
+  color: var(--amber);
+  font-weight: 700;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
 .cdTarget {
   font-family: var(--mono);
   font-size: 12px;
@@ -1103,6 +1131,14 @@ body.perfMode #mapCanvas { opacity: 0.9; }
       <div class="label">Upcoming celestial</div>
       <div class="celList" id="celList">
         <div class="celRow"><span class="when">…</span><span class="what">Loading…</span></div>
+      </div>
+    </div>
+    <div class="card solar">
+      <div class="label">Solar system · Starman</div>
+      <canvas id="solarCanvas" width="640" height="240"></canvas>
+      <div class="roadsterTel" id="roadsterTel">
+        <div class="rtitle">Tesla Roadster · telemetry</div>
+        <div>Loading…</div>
       </div>
     </div>
   </div>
@@ -2442,150 +2478,68 @@ function drawMoon() {
 }
 
 /* Second Death Star — screen-fixed upper-right, slow axial spin */
-function drawDeathStar(w, h, dpr) {
-  // Stationary screen position: upper-right of the globe
-  const cx = w * 0.78;
-  const cy = h * 0.20;
-  const R = Math.min(w, h) * (perfMode ? 0.055 : 0.07);
-  // Slow rotation (~1 rev / 90s)
-  const spin = (Date.now() / 90000) * Math.PI * 2;
-
-  mapCtx.save();
-  mapCtx.translate(cx, cy);
-
-  // Soft space glow behind it
-  const glow = mapCtx.createRadialGradient(0, 0, R * 0.5, 0, 0, R * 2.2);
-  glow.addColorStop(0, 'rgba(80, 100, 120, 0.12)');
-  glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-  mapCtx.fillStyle = glow;
-  mapCtx.beginPath();
-  mapCtx.arc(0, 0, R * 2.2, 0, Math.PI * 2);
-  mapCtx.fill();
-
-  // Main sphere body
-  const body = mapCtx.createRadialGradient(-R * 0.35, -R * 0.4, R * 0.1, 0, 0, R);
-  body.addColorStop(0, '#6a727c');
-  body.addColorStop(0.45, '#3a414a');
-  body.addColorStop(1, '#15181c');
-  mapCtx.beginPath();
-  mapCtx.arc(0, 0, R, 0, Math.PI * 2);
-  mapCtx.fillStyle = body;
-  mapCtx.fill();
-
-  // Clip to sphere for surface detail
+function drawAurora(dpr) {
+  if (!projection || !pathGen) return;
+  // Soft polar auroral ovals — geomagnetic ~65–70° lat bands
+  const t = Date.now() / 1000;
+  const ovals = [
+    { lat: 68, color: 'rgba(40, 255, 140, 0.18)', color2: 'rgba(120, 255, 200, 0.08)', phase: 0 },
+    { lat: -68, color: 'rgba(40, 255, 140, 0.16)', color2: 'rgba(180, 120, 255, 0.07)', phase: 1.2 },
+    { lat: 72, color: 'rgba(255, 120, 200, 0.1)', color2: 'rgba(80, 255, 180, 0.05)', phase: 0.6 },
+    { lat: -72, color: 'rgba(255, 100, 180, 0.09)', color2: 'rgba(100, 200, 255, 0.05)', phase: 2.0 }
+  ];
   mapCtx.save();
   mapCtx.beginPath();
-  mapCtx.arc(0, 0, R, 0, Math.PI * 2);
+  pathGen({ type: 'Sphere' });
   mapCtx.clip();
-
-  // Surface panel lattice (rotates)
-  mapCtx.strokeStyle = 'rgba(20, 24, 28, 0.55)';
-  mapCtx.lineWidth = 0.7 * dpr;
-  const panels = perfMode ? 8 : 14;
-  for (let i = -panels; i <= panels; i++) {
-    const y = (i / panels) * R;
-    const half = Math.sqrt(Math.max(0, R * R - y * y));
+  ovals.forEach((ov, idx) => {
+    const pts = [];
+    const n = perfMode ? 36 : 64;
+    for (let i = 0; i <= n; i++) {
+      const lon = (i / n) * 360 - 180;
+      // mild wavy boundary
+      const wobble = 2.5 * Math.sin((lon * Math.PI / 180) * 3 + t * 0.35 + ov.phase)
+        + 1.2 * Math.sin((lon * Math.PI / 180) * 7 + t * 0.55);
+      const lat = ov.lat + wobble * (ov.lat > 0 ? 1 : -1) * 0.35;
+      const p = projection([lon, lat]);
+      if (p) pts.push(p);
+    }
+    if (pts.length < 4) return;
     mapCtx.beginPath();
-    mapCtx.moveTo(-half, y);
-    mapCtx.lineTo(half, y);
+    pts.forEach((p, i) => { if (i === 0) mapCtx.moveTo(p[0], p[1]); else mapCtx.lineTo(p[0], p[1]); });
+    mapCtx.closePath();
+    mapCtx.strokeStyle = ov.color;
+    mapCtx.lineWidth = (perfMode ? 3 : 5) * dpr;
+    mapCtx.shadowColor = ov.color2;
+    mapCtx.shadowBlur = perfMode ? 6 : 14;
+    mapCtx.stroke();
+    // inner thinner arc
+    mapCtx.lineWidth = (perfMode ? 1.5 : 2.5) * dpr;
+    mapCtx.strokeStyle = ov.color2;
+    mapCtx.stroke();
+  });
+  // Curtain streaks (fewer in perf mode)
+  const streaks = perfMode ? 4 : 10;
+  for (let i = 0; i < streaks; i++) {
+    const lon0 = ((i * 37 + t * 8) % 360) - 180;
+    const north = i % 2 === 0;
+    const lat0 = north ? 62 : -62;
+    const lat1 = north ? 78 : -78;
+    const p0 = projection([lon0, lat0]);
+    const p1 = projection([lon0 + 4 * Math.sin(t + i), lat1]);
+    if (!p0 || !p1) continue;
+    const g = mapCtx.createLinearGradient(p0[0], p0[1], p1[0], p1[1]);
+    g.addColorStop(0, 'rgba(40, 255, 150, 0)');
+    g.addColorStop(0.4, 'rgba(60, 255, 160, 0.22)');
+    g.addColorStop(1, 'rgba(200, 120, 255, 0)');
+    mapCtx.beginPath();
+    mapCtx.moveTo(p0[0], p0[1]);
+    mapCtx.lineTo(p1[0], p1[1]);
+    mapCtx.strokeStyle = g;
+    mapCtx.lineWidth = 2 * dpr;
+    mapCtx.shadowBlur = 0;
     mapCtx.stroke();
   }
-  for (let i = 0; i < panels; i++) {
-    const ang = spin + (i / panels) * Math.PI * 2;
-    mapCtx.beginPath();
-    mapCtx.moveTo(0, -R);
-    mapCtx.lineTo(Math.sin(ang) * R, Math.cos(ang) * R * 0.15);
-    mapCtx.lineTo(0, R);
-    mapCtx.stroke();
-  }
-
-  // Equatorial trench
-  mapCtx.beginPath();
-  mapCtx.ellipse(0, 0, R * 0.98, R * 0.12, 0, 0, Math.PI * 2);
-  mapCtx.strokeStyle = 'rgba(8, 10, 12, 0.85)';
-  mapCtx.lineWidth = 2.2 * dpr;
-  mapCtx.stroke();
-  mapCtx.beginPath();
-  mapCtx.ellipse(0, 0, R * 0.98, R * 0.06, 0, 0, Math.PI * 2);
-  mapCtx.strokeStyle = 'rgba(90, 100, 110, 0.35)';
-  mapCtx.lineWidth = 1 * dpr;
-  mapCtx.stroke();
-
-  // Superlaser dish (DS-II style, upper-left quadrant of the face)
-  const dishX = -R * 0.28 + Math.cos(spin) * R * 0.08;
-  const dishY = -R * 0.32 + Math.sin(spin * 0.7) * R * 0.05;
-  const dishR = R * 0.34;
-  mapCtx.beginPath();
-  mapCtx.arc(dishX, dishY, dishR, 0, Math.PI * 2);
-  mapCtx.fillStyle = 'rgba(12, 14, 18, 0.92)';
-  mapCtx.fill();
-  mapCtx.strokeStyle = 'rgba(100, 110, 120, 0.5)';
-  mapCtx.lineWidth = 1.2 * dpr;
-  mapCtx.stroke();
-  // Concentric dish rings
-  for (let k = 1; k <= 3; k++) {
-    mapCtx.beginPath();
-    mapCtx.arc(dishX, dishY, dishR * (k / 3.5), 0, Math.PI * 2);
-    mapCtx.strokeStyle = `rgba(70, 80, 90, ${0.25 + k * 0.08})`;
-    mapCtx.lineWidth = 0.8 * dpr;
-    mapCtx.stroke();
-  }
-  // Dim focusing crystal glint
-  mapCtx.beginPath();
-  mapCtx.arc(dishX, dishY, dishR * 0.08, 0, Math.PI * 2);
-  mapCtx.fillStyle = 'rgba(180, 210, 230, 0.35)';
-  mapCtx.fill();
-
-  // Incomplete northern hemisphere — scaffolding gap (Death Star II trademark)
-  // Cutaway wedge that rotates slowly
-  const gapA0 = spin * 0.35 - 0.9;
-  const gapA1 = gapA0 + 1.35;
-  mapCtx.beginPath();
-  mapCtx.moveTo(0, 0);
-  mapCtx.arc(0, 0, R * 1.02, gapA0, gapA1);
-  mapCtx.closePath();
-  mapCtx.fillStyle = 'rgba(4, 6, 10, 0.75)';
-  mapCtx.fill();
-
-  // Exposed internal lattice in the incomplete section
-  mapCtx.strokeStyle = 'rgba(120, 130, 140, 0.4)';
-  mapCtx.lineWidth = 0.9 * dpr;
-  for (let i = 0; i < 5; i++) {
-    const a = gapA0 + (i / 4) * (gapA1 - gapA0);
-    mapCtx.beginPath();
-    mapCtx.moveTo(Math.cos(a) * R * 0.35, Math.sin(a) * R * 0.35);
-    mapCtx.lineTo(Math.cos(a) * R * 0.95, Math.sin(a) * R * 0.95);
-    mapCtx.stroke();
-  }
-  // Cross-rings in the gap
-  for (let rFrac of [0.5, 0.7, 0.88]) {
-    mapCtx.beginPath();
-    mapCtx.arc(0, 0, R * rFrac, gapA0, gapA1);
-    mapCtx.stroke();
-  }
-
-  mapCtx.restore(); // end clip
-
-  // Rim highlight
-  mapCtx.beginPath();
-  mapCtx.arc(0, 0, R, 0, Math.PI * 2);
-  mapCtx.strokeStyle = 'rgba(140, 150, 160, 0.35)';
-  mapCtx.lineWidth = 1.2 * dpr;
-  mapCtx.stroke();
-
-  // Subtle specular edge on sunward side
-  mapCtx.beginPath();
-  mapCtx.arc(-R * 0.15, -R * 0.2, R * 0.92, -2.2, -0.6);
-  mapCtx.strokeStyle = 'rgba(200, 210, 220, 0.12)';
-  mapCtx.lineWidth = 2 * dpr;
-  mapCtx.stroke();
-
-  if (!perfMode) {
-    mapCtx.font = `${9 * dpr}px JetBrains Mono, monospace`;
-    mapCtx.fillStyle = 'rgba(150, 160, 175, 0.45)';
-    mapCtx.fillText('DS-II', R * 0.55, R * 1.25);
-  }
-
   mapCtx.restore();
 }
 
@@ -2595,7 +2549,6 @@ function drawMap() {
   mapCtx.clearRect(0, 0, w, h);
 
   drawCelestialBackground(w, h, dpr);
-  drawDeathStar(w, h, dpr);
 
   if (!projection) return;
   if (!paused) mapRotation = (mapRotation + (perfMode ? 0.07 : 0.04)) % 360;
@@ -2654,6 +2607,8 @@ function drawMap() {
   mapCtx.fillStyle = grad;
   mapCtx.fillRect(0, 0, w, h);
   mapCtx.restore();
+
+  drawAurora(dpr);
 
   // home QTH
   const home = projection([station.lon, station.lat]);
@@ -3131,6 +3086,7 @@ function frame(ts) {
   drawMap();
   // Radar is cheaper; still throttle slightly in perf mode
   if (!perfMode || (frameSkip++ % 2 === 0)) drawRadar();
+  if (!perfMode || (frameSkip % 3 === 0)) drawSolarSystem();
 }
 
 /* ─── Boot ─── */
@@ -3380,6 +3336,153 @@ function renderCelestial() {
   }).join('');
 }
 
+/* ─── Solar system + Tesla Roadster (Starman) ─── */
+/* Heliocentric elements: a in AU, period in days, color. Not to scale for outer planets (compressed). */
+const SOLAR_BODIES = [
+  { name: 'Mer', a: 0.387, period: 87.97, color: '#b0b0b0', r: 2.0 },
+  { name: 'Ven', a: 0.723, period: 224.7, color: '#e8cda0', r: 2.6 },
+  { name: 'Ear', a: 1.000, period: 365.25, color: '#4ea8ff', r: 2.8 },
+  { name: 'Mar', a: 1.524, period: 687.0, color: '#e07a5f', r: 2.3 },
+  { name: 'Jup', a: 5.203, period: 4331, color: '#d4a373', r: 4.5 },
+  { name: 'Sat', a: 9.537, period: 10747, color: '#f0d9a0', r: 4.0 },
+  { name: 'Ura', a: 19.19, period: 30689, color: '#7ec8e3', r: 3.2 },
+  { name: 'Nep', a: 30.07, period: 60190, color: '#5b7cfa', r: 3.2 }
+];
+/* Roadster / Starman — approx public heliocentric elements */
+const ROADSTER = {
+  name: 'Roadster',
+  a: 1.325,          // AU
+  e: 0.2558,
+  period: 557.0,     // days
+  i: 1.077,          // deg
+  epoch: Date.UTC(2018, 1, 8), // launch era reference
+  m0: 0.4            // rad mean anomaly at epoch (approx)
+};
+function helioScale(a) {
+  // Compress outer system so all fit: linear to Mars, then log-ish
+  if (a <= 1.7) return a;
+  return 1.7 + Math.log(a / 1.7) * 1.15;
+}
+function bodyAnomaly(periodDays, epochMs, nowMs) {
+  const days = (nowMs - (epochMs || Date.UTC(2000, 0, 1))) / 86400000;
+  return (2 * Math.PI * (days / periodDays)) % (2 * Math.PI);
+}
+function roadsterState(now = new Date()) {
+  const days = (now.getTime() - ROADSTER.epoch) / 86400000;
+  let M = (ROADSTER.m0 + 2 * Math.PI * days / ROADSTER.period) % (2 * Math.PI);
+  if (M < 0) M += 2 * Math.PI;
+  const E = solveE(M, ROADSTER.e);
+  const cosE = Math.cos(E), sinE = Math.sin(E);
+  const nu = Math.atan2(Math.sqrt(1 - ROADSTER.e * ROADSTER.e) * sinE, cosE - ROADSTER.e);
+  const r = ROADSTER.a * (1 - ROADSTER.e * cosE); // AU from Sun
+  // velocity approx vis-viva (km/s)
+  const mu = 1.327e11; // km^3/s^2
+  const a_km = ROADSTER.a * 1.496e8;
+  const r_km = r * 1.496e8;
+  const v = Math.sqrt(mu * (2 / r_km - 1 / a_km));
+  const peri = ROADSTER.a * (1 - ROADSTER.e);
+  const aph = ROADSTER.a * (1 + ROADSTER.e);
+  const ageYears = days / 365.25;
+  return { r, nu, v, peri, aph, ageYears, M };
+}
+function drawSolarSystem() {
+  const canvas = document.getElementById('solarCanvas');
+  const tel = document.getElementById('roadsterTel');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = perfMode ? 1 : Math.min(devicePixelRatio || 1, 2);
+  const cssW = canvas.clientWidth || 320;
+  const cssH = canvas.clientHeight || 120;
+  if (canvas.width !== Math.floor(cssW * dpr) || canvas.height !== Math.floor(cssH * dpr)) {
+    canvas.width = Math.floor(cssW * dpr);
+    canvas.height = Math.floor(cssH * dpr);
+  }
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  const cx = w * 0.42, cy = h * 0.52;
+  const maxA = helioScale(30.07);
+  const scale = Math.min(w, h) * 0.42 / maxA;
+  const now = Date.now();
+
+  // orbit rings
+  SOLAR_BODIES.forEach(b => {
+    const rad = helioScale(b.a) * scale;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(100, 140, 180, 0.18)';
+    ctx.lineWidth = 1 * dpr;
+    ctx.stroke();
+  });
+  // Roadster orbit (ellipse approx: scale by a, squash by e visually slight)
+  const ra = helioScale(ROADSTER.a) * scale;
+  const rb = ra * Math.sqrt(1 - ROADSTER.e * ROADSTER.e * 0.5);
+  ctx.beginPath();
+  ctx.ellipse(cx + (ROADSTER.a * ROADSTER.e * 0.15 * scale), cy, ra, rb, -0.15, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255, 80, 80, 0.45)';
+  ctx.lineWidth = 1.2 * dpr;
+  ctx.setLineDash([3 * dpr, 3 * dpr]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Sun
+  const sunR = 6 * dpr;
+  const sg = ctx.createRadialGradient(cx, cy, 0, cx, cy, sunR * 2.5);
+  sg.addColorStop(0, '#fff4c0');
+  sg.addColorStop(0.4, '#ffcc44');
+  sg.addColorStop(1, 'rgba(255, 160, 40, 0)');
+  ctx.fillStyle = sg;
+  ctx.beginPath();
+  ctx.arc(cx, cy, sunR * 2.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, sunR, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffdd66';
+  ctx.fill();
+
+  // Planets
+  SOLAR_BODIES.forEach(b => {
+    const ang = bodyAnomaly(b.period, Date.UTC(2000, 0, 1), now);
+    const rad = helioScale(b.a) * scale;
+    const x = cx + Math.cos(ang) * rad;
+    const y = cy + Math.sin(ang) * rad * 0.55; // slight perspective flatten
+    ctx.beginPath();
+    ctx.arc(x, y, b.r * dpr, 0, Math.PI * 2);
+    ctx.fillStyle = b.color;
+    ctx.fill();
+    if (!perfMode) {
+      ctx.font = `${9 * dpr}px JetBrains Mono, monospace`;
+      ctx.fillStyle = 'rgba(180, 200, 220, 0.7)';
+      ctx.fillText(b.name, x + 4 * dpr, y - 3 * dpr);
+    }
+  });
+
+  // Roadster
+  const rs = roadsterState(new Date(now));
+  const rr = helioScale(rs.r) * scale;
+  const rx = cx + Math.cos(rs.nu) * rr;
+  const ry = cy + Math.sin(rs.nu) * rr * 0.55;
+  ctx.beginPath();
+  ctx.arc(rx, ry, 3.2 * dpr, 0, Math.PI * 2);
+  ctx.fillStyle = '#ff4444';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(rx, ry, 6 * dpr, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255, 80, 80, 0.55)';
+  ctx.lineWidth = 1 * dpr;
+  ctx.stroke();
+  ctx.font = `bold ${9 * dpr}px JetBrains Mono, monospace`;
+  ctx.fillStyle = 'rgba(255, 140, 120, 0.9)';
+  ctx.fillText('★', rx + 5 * dpr, ry - 2 * dpr);
+
+  if (tel) {
+    tel.innerHTML = `<div class="rtitle">Tesla Roadster · Starman</div>
+      <div>r <strong>${rs.r.toFixed(3)} AU</strong> · v <strong>${rs.v.toFixed(1)} km/s</strong></div>
+      <div>peri <strong>${rs.peri.toFixed(3)}</strong> · aph <strong>${rs.aph.toFixed(3)} AU</strong></div>
+      <div>i <strong>${ROADSTER.i.toFixed(2)}°</strong> · P <strong>${ROADSTER.period.toFixed(0)} d</strong></div>
+      <div>in space <strong>${rs.ageYears.toFixed(2)} yr</strong> · Falcon Heavy 2018</div>`;
+  }
+}
+
 function boot() {
   applyPerfMode();
   applyStation();
@@ -3420,11 +3523,13 @@ function boot() {
   setInterval(updatePasses, 10 * 1000);
 
   initMap();
+  drawSolarSystem();
   window.addEventListener('resize', () => {
     resizeMapCanvas();
     if (projection) {
       projection.translate([mapCanvas.width * 0.38, mapCanvas.height * 0.52]);
     }
+    drawSolarSystem();
   });
 
   requestAnimationFrame(frame);
