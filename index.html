@@ -814,9 +814,15 @@ body.perfMode #mapCanvas { opacity: 0.9; }
   border-color: rgba(255, 90, 90, 0.35);
 }
 #viewersHud {
-  bottom: 58px;
-  right: 16px;
-  min-width: 140px;
+  bottom: auto;
+  left: 16px;
+  /* sit above roadster HUD */
+  bottom: 210px;
+  min-width: 160px;
+  max-width: 260px;
+}
+@media (max-height: 700px) {
+  #viewersHud { bottom: 190px; }
 }
 #roadsterHud .rhTitle, #viewersHud .vhTitle {
   color: var(--amber);
@@ -1170,10 +1176,10 @@ body.perfMode #mapCanvas { opacity: 0.9; }
   
   <div id="roadsterHud">
     <div class="rhTitle">Tesla Roadster · Starman</div>
-    <div id="roadsterHudBody">Loading JPL Horizons…</div>
+    <div id="roadsterHudBody">Loading whereisroadster.com…</div>
   </div>
   <div id="viewersHud">
-    <div class="vhTitle">Live viewers · <strong id="viewerCount">1</strong></div>
+    <div class="vhTitle">Live viewers · Hamdash2 · <strong id="viewerCount">1</strong></div>
     <div id="viewersList"></div>
   </div>
 
@@ -2664,9 +2670,10 @@ function drawMap() {
     if (onAir) {
       const t = Date.now() / 1000;
       const maxR = Math.min(mapCanvas.width, mapCanvas.height) * 0.11;
-      const nRings = perfMode ? 3 : 4;
+      const nRings = perfMode ? 2 : 3;
       for (let i = 0; i < nRings; i++) {
-        const phase = (t * 0.55 + i / nRings) % 1;
+        // ~1 full expansion cycle per second (staggered rings)
+        const phase = (t * 1.0 + i / nRings) % 1;
         const rad = 8 * dprH + phase * maxR;
         const alpha = (1 - phase) * 0.55;
         // Flatten Y for a 3D “sitting on the globe” look
@@ -3435,7 +3442,100 @@ function projectHelioOnSky(helioLonDeg, eclLat, factor) {
   return projectAlt(skyLon, skyLat, factor);
 }
 
+async function fetchWhereIsRoadster() {
+  // Primary source: whereisroadster.com (client-rendered text; proxy for CORS)
+  const pageUrl = 'https://www.whereisroadster.com/';
+  const proxies = [
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent(pageUrl),
+    'https://corsproxy.io/?' + encodeURIComponent(pageUrl)
+  ];
+  for (const url of proxies) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const text = await res.text();
+      // Parse live stats from page prose
+      const earth = text.match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU[^]*?from Earth[^]*?(toward|away from) Earth[^]*?([\d,]+)\s*km\/h,\s*([\d.]+)\s*km\/s/i)
+        || text.match(/from Earth[^]*?([\d,]+)\s*km,\s*([\d.]+)\s*AU[^]*?(toward|away from) Earth[^]*?([\d.]+)\s*km\/s/i);
+      const mars = text.match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU[^]*?from Mars[^]*?(toward|away from)[^]*?([\d.]+)\s*km\/s/i);
+      const sun = text.match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU[^]*?from the Sun[^]*?(toward|away from)[^]*?([\d.]+)\s*km\/s/i)
+        || text.match(/from the Sun[^]*?([\d,]+)\s*km,\s*([\d.]+)\s*AU[^]*?(toward|away from)[^]*?([\d.]+)\s*km\/s/i);
+      const orbits = text.match(/completed about\s*([\d.]+)\s*orbits/i);
+      const period = text.match(/orbital period is about\s*([\d.]+)\s*days/i);
+      const light = text.match(/([\d.]+)\s*light\s*minutes\)\s*from Earth/i)
+        || text.match(/from Earth[^]*?([\d.]+)\s*light\s*minutes/i);
+      // Flexible parse for Earth block
+      let earthAu = null, earthKm = null, earthKms = null, earthDir = null;
+      let marsAu = null, marsKm = null, marsKms = null, marsDir = null;
+      let sunAu = null, sunKm = null, sunKms = null, sunDir = null;
+
+      const eBlock = text.match(/from Earth[,\s]+moving (toward|away from) Earth at a speed of[\s\S]{0,80}?([\d,.]+)\s*km\/h,\s*([\d.]+)\s*km\/s/i);
+      const eDist = text.match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU,\s*([\d.]+)\s*light\s*minutes\)\s*from Earth/i)
+        || text.match(/is\s+([\d,]+)\s*miles\s*\(\s*([\d,]+)\s*km,\s*([\d.]+)\s*AU,\s*([\d.]+)\s*light\s*minutes\)\s*from Earth/i);
+      if (eDist) {
+        // groups may vary
+        const nums = eDist[0].match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU,\s*([\d.]+)\s*light/);
+        if (nums) {
+          earthKm = parseFloat(nums[1].replace(/,/g, ''));
+          earthAu = parseFloat(nums[2]);
+        }
+      }
+      if (eBlock) {
+        earthDir = eBlock[1].toLowerCase().includes('toward') ? 'toward' : 'away';
+        earthKms = parseFloat(eBlock[3]);
+      }
+      const mDist = text.match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU,\s*([\d.]+)\s*light\s*minutes\)\s*from Mars/i);
+      const mBlock = text.match(/from Mars,\s*moving (toward|away from)[^]*?([\d.]+)\s*km\/s/i);
+      if (mDist) {
+        const nums = mDist[0].match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU/);
+        if (nums) { marsKm = parseFloat(nums[1].replace(/,/g, '')); marsAu = parseFloat(nums[2]); }
+      }
+      if (mBlock) {
+        marsDir = mBlock[1].toLowerCase().includes('toward') ? 'toward' : 'away';
+        marsKms = parseFloat(mBlock[2]);
+      }
+      const sDist = text.match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU,\s*([\d.]+)\s*light\s*minutes\)\s*from the Sun/i);
+      const sBlock = text.match(/from the Sun,\s*moving (toward|away from)[^]*?([\d.]+)\s*km\/s/i);
+      if (sDist) {
+        const nums = sDist[0].match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU/);
+        if (nums) { sunKm = parseFloat(nums[1].replace(/,/g, '')); sunAu = parseFloat(nums[2]); }
+      }
+      if (sBlock) {
+        sunDir = sBlock[1].toLowerCase().includes('toward') ? 'toward' : 'away';
+        sunKms = parseFloat(sBlock[2]);
+      }
+
+      if (sunAu || earthAu) {
+        roadsterLive = {
+          rAu: sunAu || (roadsterLive && roadsterLive.rAu) || null,
+          earthAu: earthAu,
+          earthKm: earthKm,
+          earthKms: earthKms,
+          earthDir: earthDir,
+          marsAu: marsAu,
+          marsKm: marsKm,
+          marsKms: marsKms,
+          marsDir: marsDir,
+          speedKms: sunKms || earthKms || null,
+          sunDir: sunDir,
+          orbits: orbits ? parseFloat(orbits[1]) : null,
+          periodDays: period ? parseFloat(period[1]) : 557,
+          lightMin: light ? parseFloat(light[1]) : (earthKm ? earthKm / 299792.458 / 60 : null),
+          source: 'whereisroadster.com',
+          updated: Date.now()
+        };
+        updateRoadsterHud();
+        return true;
+      }
+    } catch (e) { /* try next */ }
+  }
+  return false;
+}
+
 async function fetchRoadsterJpl() {
+  // Prefer whereisroadster.com live numbers; fall back to NASA/JPL Horizons -143205
+  const ok = await fetchWhereIsRoadster();
+  if (ok) return;
   const day = new Date().toISOString().slice(0, 10);
   const next = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const q = new URLSearchParams({
@@ -3461,37 +3561,19 @@ async function fetchRoadsterJpl() {
       const text = await res.text();
       const m = text.match(/X =\s*([-\d.E+]+)\s*Y =\s*([-\d.E+]+)\s*Z =\s*([-\d.E+]+)\s*[\s\S]*?VX=\s*([-\d.E+]+)\s*VY=\s*([-\d.E+]+)\s*VZ=\s*([-\d.E+]+)\s*[\s\S]*?RG=\s*([-\d.E+]+)/i);
       if (!m) continue;
-      const X = parseFloat(m[1]), Y = parseFloat(m[2]), Z = parseFloat(m[3]);
       const VX = parseFloat(m[4]), VY = parseFloat(m[5]), VZ = parseFloat(m[6]);
       const RG = parseFloat(m[7]);
       const speedAuD = Math.sqrt(VX*VX + VY*VY + VZ*VZ);
       const speedKms = speedAuD * 149597870.7 / 86400;
-      // Earth distance: second query optional — estimate from vector vs Earth later
-      roadsterLive = {
+      roadsterLive = Object.assign({}, roadsterLive || {}, {
         rAu: RG,
         speedKms,
-        x: X, y: Y, z: Z,
-        source: 'NASA/JPL Horizons · -143205',
+        source: 'NASA/JPL Horizons · -143205 (fallback)',
         updated: Date.now()
-      };
-      // Earth-centered distance
-      try {
-        const qE = new URLSearchParams({
-          format: 'text', COMMAND: "'-143205'", MAKE_EPHEM: 'YES', EPHEM_TYPE: 'VECTORS',
-          CENTER: "'500@399'", START_TIME: "'" + day + "'", STOP_TIME: "'" + next + "'",
-          STEP_SIZE: "'1 d'", OUT_UNITS: 'AU-D'
-        });
-        const uE = 'https://ssd.jpl.nasa.gov/api/horizons.api?' + qE.toString();
-        const r2 = await fetch(uE).catch(() => null);
-        if (r2 && r2.ok) {
-          const t2 = await r2.text();
-          const m2 = t2.match(/RG=\s*([-\d.E+]+)/i);
-          if (m2) roadsterLive.earthAu = parseFloat(m2[1]);
-        }
-      } catch (e) {}
+      });
       updateRoadsterHud();
       return;
-    } catch (e) { /* next */ }
+    } catch (e) {}
   }
   updateRoadsterHud();
 }
@@ -3500,24 +3582,35 @@ function updateRoadsterHud() {
   const el = document.getElementById('roadsterHudBody');
   if (!el) return;
   const rs = roadsterState();
-  const rAu = rs.r;
-  const v = rs.v;
-  const earthAu = rs.earthAu;
-  const earthKm = earthAu != null ? earthAu * 149597870.7 : null;
+  const L = roadsterLive || {};
+  const rAu = L.rAu != null ? L.rAu : rs.r;
+  const v = L.speedKms != null ? L.speedKms : rs.v;
+  const earthAu = L.earthAu != null ? L.earthAu : rs.earthAu;
+  const earthKm = L.earthKm != null ? L.earthKm : (earthAu != null ? earthAu * 149597870.7 : null);
   const sunKm = rAu * 149597870.7;
-  const lightMin = earthKm != null ? (earthKm / 299792.458) / 60 : null;
+  const lightMin = L.lightMin != null ? L.lightMin : (earthKm != null ? earthKm / 299792.458 / 60 : null);
+  const dir = (d) => d === 'toward' ? '↓ toward' : d === 'away' ? '↑ away' : '';
   el.innerHTML =
-    `<div>Sun <strong>${rAu.toFixed(3)} AU</strong> · <strong>${(sunKm/1e6).toFixed(1)} M km</strong></div>` +
+    `<div>Sun <strong>${rAu.toFixed(3)} AU</strong> · <strong>${(sunKm/1e6).toFixed(1)} M km</strong>` +
+    (L.sunDir ? ` <span style="color:var(--faint)">${dir(L.sunDir)}</span>` : '') + `</div>` +
     (earthKm != null
-      ? `<div>Earth <strong>${earthAu.toFixed(3)} AU</strong> · <strong>${(earthKm/1e6).toFixed(1)} M km</strong></div>`
-      : `<div>Earth <strong>—</strong> (JPL range pending)</div>`) +
-    `<div>Speed <strong>${v.toFixed(2)} km/s</strong> · <strong>${(v*3600).toFixed(0)} km/h</strong></div>` +
-    (lightMin != null ? `<div>Light-time <strong>${lightMin.toFixed(1)} min</strong></div>` : '') +
-    `<div>Orbit <strong>${rs.peri.toFixed(3)}–${rs.aph.toFixed(3)} AU</strong> · P <strong>${ROADSTER.period.toFixed(0)} d</strong></div>` +
-    `<div>Laps <strong>${rs.orbits.toFixed(2)}</strong> · in space <strong>${rs.ageYears.toFixed(2)} yr</strong></div>` +
+      ? `<div>Earth <strong>${(earthAu != null ? earthAu : earthKm/149597870.7).toFixed(3)} AU</strong> · <strong>${(earthKm/1e6).toFixed(1)} M km</strong>` +
+        (L.earthDir ? ` <span style="color:var(--faint)">${dir(L.earthDir)}</span>` : '') +
+        (L.earthKms != null ? ` · <strong>${L.earthKms.toFixed(2)} km/s</strong>` : '') + `</div>`
+      : `<div>Earth <strong>—</strong></div>`) +
+    (L.marsAu != null
+      ? `<div>Mars <strong>${L.marsAu.toFixed(3)} AU</strong> · <strong>${((L.marsKm||L.marsAu*149597870.7)/1e6).toFixed(1)} M km</strong>` +
+        (L.marsDir ? ` <span style="color:var(--faint)">${dir(L.marsDir)}</span>` : '') + `</div>`
+      : '') +
+    `<div>Speed (Sun) <strong>${v.toFixed(2)} km/s</strong> · <strong>${(v*3600).toFixed(0)} km/h</strong></div>` +
+    (lightMin != null ? `<div>Light-time <strong>${lightMin.toFixed(2)} min</strong></div>` : '') +
+    `<div>Orbit <strong>${rs.peri.toFixed(3)}–${rs.aph.toFixed(3)} AU</strong> · P <strong>${(L.periodDays||ROADSTER.period).toFixed(0)} d</strong></div>` +
+    `<div>Laps <strong>${(L.orbits != null ? L.orbits : rs.orbits).toFixed(2)}</strong> · in space <strong>${rs.ageYears.toFixed(2)} yr</strong></div>` +
     `<div>Launch <strong>2018-02-06</strong> Falcon Heavy · Starman</div>` +
-    `<div style="margin-top:3px;color:var(--faint);font-size:9px;">Source: ${roadsterLive && roadsterLive.source ? roadsterLive.source : 'Kepler approx · JPL -143205'}</div>`;
+    `<div style="margin-top:3px;color:var(--faint);font-size:9px;">Source: <a href="https://www.whereisroadster.com/" target="_blank" rel="noopener" style="color:var(--cyan);pointer-events:auto;">whereisroadster.com</a>` +
+    (L.source && L.source.indexOf('JPL') >= 0 ? ' · JPL fallback' : '') + `</div>`;
 }
+
 
 function drawSolarSystemSky(w, h, dpr) {
   if (!projection) return;
@@ -3641,6 +3734,7 @@ function publishMyPresence() {
     lon: station.lon,
     color: myViewerColor,
     t: Date.now(),
+    site: 'xoemorx.github.io/Hamdash2',
     self: true
   };
   liveViewers[myViewerId] = payload;
@@ -3649,7 +3743,7 @@ function publishMyPresence() {
   } catch (e) {}
   try {
     if (window.__hmcGun) {
-      window.__hmcGun.get('hmc-viewers').get(myViewerId).put({
+      window.__hmcGun.get('hmc-viewers-hamdash2').get(myViewerId).put({
         id: myViewerId,
         call: payload.call,
         lat: payload.lat,
@@ -3672,7 +3766,7 @@ function pruneViewers() {
 
 function initPresence() {
   try {
-    const bc = new BroadcastChannel('hmc-presence');
+    const bc = new BroadcastChannel('hmc-presence-hamdash2');
     window.__hmcBc = bc;
     bc.onmessage = (ev) => {
       const msg = ev.data;
@@ -3686,7 +3780,7 @@ function initPresence() {
     if (typeof Gun !== 'undefined') {
       const gun = Gun(['https://gun-manhattan.herokuapp.com/gun', 'https://gun-us.herokuapp.com/gun']);
       window.__hmcGun = gun;
-      gun.get('hmc-viewers').map().on((data, id) => {
+      gun.get('hmc-viewers-hamdash2').map().on((data, id) => {
         if (!data || !id || id === myViewerId) return;
         if (typeof data.lat !== 'number' || typeof data.lon !== 'number') return;
         if (Date.now() - (data.t || 0) > 120000) return;
@@ -3718,7 +3812,7 @@ function renderViewersHud() {
   list.innerHTML = arr.slice(0, 12).map(v =>
     `<div class="vhRow"><span class="vhDot" style="background:${v.color}"></span>` +
     `<span>${v.self ? '<strong>YOU</strong> · ' : ''}${v.call || 'VISITOR'}</span></div>`
-  ).join('') || '<div class="vhRow">Only you right now</div>';
+  ).join('') || '<div class="vhRow">Only you on Hamdash2 right now</div>';
 }
 
 function drawLiveViewers() {
