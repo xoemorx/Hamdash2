@@ -9,7 +9,6 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
 <style>
 :root {
   --ink: #f0f4f8;
@@ -792,12 +791,12 @@ body.perfMode #mapCanvas { opacity: 0.9; }
 /* Map arcs / spots overlay handled in canvas */
 
 
-/* Roadster + live viewers HUD */
-#roadsterHud, #viewersHud {
+/* Starman / Roadster telemetry HUD */
+#roadsterHud {
   position: absolute;
   z-index: 18;
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1px solid rgba(255, 90, 90, 0.35);
   border-radius: 10px;
   padding: 8px 10px;
   backdrop-filter: blur(12px);
@@ -805,51 +804,28 @@ body.perfMode #mapCanvas { opacity: 0.9; }
   font-size: 10px;
   color: var(--dim);
   line-height: 1.45;
-  max-width: 260px;
+  max-width: 280px;
   pointer-events: none;
-}
-#roadsterHud {
   bottom: 58px;
   left: 16px;
-  border-color: rgba(255, 90, 90, 0.35);
 }
-#viewersHud {
-  bottom: auto;
-  left: 16px;
-  /* sit above roadster HUD */
-  bottom: 210px;
-  min-width: 160px;
-  max-width: 260px;
-}
-@media (max-height: 700px) {
-  #viewersHud { bottom: 190px; }
-}
-#roadsterHud .rhTitle, #viewersHud .vhTitle {
-  color: var(--amber);
+#roadsterHud .rhTitle {
+  color: #ff7a6a;
   font-weight: 700;
   font-size: 11px;
   margin-bottom: 4px;
 }
-#roadsterHud .rhTitle { color: #ff7a6a; }
-#roadsterHud strong, #viewersHud strong { color: var(--cyan); font-weight: 600; }
-#viewersHud .vhRow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 3px;
-}
-#viewersHud .vhDot {
-  width: 8px; height: 8px; border-radius: 50%;
-  flex: 0 0 auto;
-}
+#roadsterHud strong { color: var(--cyan); font-weight: 600; }
+#roadsterHud a { pointer-events: auto; }
 @media (max-width: 1100px) {
-  #roadsterHud, #viewersHud {
+  #roadsterHud {
     position: relative;
     bottom: auto; left: auto; right: auto;
     margin: 8px 12px;
     max-width: none;
   }
 }
+
 
 .toast {
   position: absolute;
@@ -1175,12 +1151,8 @@ body.perfMode #mapCanvas { opacity: 0.9; }
 
   
   <div id="roadsterHud">
-    <div class="rhTitle">Tesla Roadster · Starman</div>
+    <div class="rhTitle">Starman · Tesla Roadster · telemetry</div>
     <div id="roadsterHudBody">Loading whereisroadster.com…</div>
-  </div>
-  <div id="viewersHud">
-    <div class="vhTitle">Live viewers · Hamdash2 · <strong id="viewerCount">1</strong></div>
-    <div id="viewersList"></div>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -1456,7 +1428,6 @@ function applyStation() {
   document.title = station.call + ' Mission Control';
   if (typeof updateSatPanel === 'function') updateSatPanel();
   if (typeof renderCelestial === 'function') renderCelestial();
-  if (typeof publishMyPresence === 'function') publishMyPresence();
   if (typeof tickCountdown === 'function') tickCountdown();
 }
 
@@ -2672,8 +2643,8 @@ function drawMap() {
       const maxR = Math.min(mapCanvas.width, mapCanvas.height) * 0.11;
       const nRings = perfMode ? 2 : 3;
       for (let i = 0; i < nRings; i++) {
-        // ~1 full expansion cycle per second (staggered rings)
-        const phase = (t * 1.0 + i / nRings) % 1;
+        // Very slow: ~1 full expansion cycle every 100 seconds
+        const phase = (t * 0.01 + i / nRings) % 1;
         const rad = 8 * dprH + phase * maxR;
         const alpha = (1 - phase) * 0.55;
         // Flatten Y for a 3D “sitting on the globe” look
@@ -3702,154 +3673,15 @@ function drawSolarSystemSky(w, h, dpr) {
   }
 }
 
-/* ─── Live page viewers on the globe (unique colors) ─── */
-const VIEWER_COLORS = [
-  '#3ee6ff', '#ff6b9d', '#c4f542', '#ffb627', '#a78bfa',
-  '#34d399', '#fb7185', '#38bdf8', '#fbbf24', '#e879f9',
-  '#2dd4bf', '#f97316', '#818cf8', '#4ade80', '#f472b6'
-];
-function hashHue(str) {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
-  return VIEWER_COLORS[h % VIEWER_COLORS.length];
-}
-function getViewerId() {
-  let id = localStorage.getItem('hmc_viewer_id');
-  if (!id) {
-    id = 'v_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
-    localStorage.setItem('hmc_viewer_id', id);
-  }
-  return id;
-}
-const myViewerId = getViewerId();
-const myViewerColor = hashHue(myViewerId);
-/** @type {Record<string, {id:string,call:string,lat:number,lon:number,color:string,t:number,self?:boolean}>} */
-let liveViewers = {};
-
-function publishMyPresence() {
-  const payload = {
-    id: myViewerId,
-    call: (station && station.call) || 'VISITOR',
-    lat: station.lat,
-    lon: station.lon,
-    color: myViewerColor,
-    t: Date.now(),
-    site: 'xoemorx.github.io/Hamdash2',
-    self: true
-  };
-  liveViewers[myViewerId] = payload;
-  try {
-    if (window.__hmcBc) window.__hmcBc.postMessage({ type: 'presence', viewer: { ...payload, self: false } });
-  } catch (e) {}
-  try {
-    if (window.__hmcGun) {
-      window.__hmcGun.get('hmc-viewers-hamdash2').get(myViewerId).put({
-        id: myViewerId,
-        call: payload.call,
-        lat: payload.lat,
-        lon: payload.lon,
-        color: payload.color,
-        t: payload.t
-      });
-    }
-  } catch (e) {}
-  renderViewersHud();
-}
-
-function pruneViewers() {
-  const now = Date.now();
-  Object.keys(liveViewers).forEach(id => {
-    if (id === myViewerId) return;
-    if (now - (liveViewers[id].t || 0) > 90000) delete liveViewers[id];
-  });
-}
-
-function initPresence() {
-  try {
-    const bc = new BroadcastChannel('hmc-presence-hamdash2');
-    window.__hmcBc = bc;
-    bc.onmessage = (ev) => {
-      const msg = ev.data;
-      if (!msg || msg.type !== 'presence' || !msg.viewer) return;
-      if (msg.viewer.id === myViewerId) return;
-      liveViewers[msg.viewer.id] = { ...msg.viewer, self: false, t: Date.now() };
-      renderViewersHud();
-    };
-  } catch (e) {}
-  try {
-    if (typeof Gun !== 'undefined') {
-      const gun = Gun(['https://gun-manhattan.herokuapp.com/gun', 'https://gun-us.herokuapp.com/gun']);
-      window.__hmcGun = gun;
-      gun.get('hmc-viewers-hamdash2').map().on((data, id) => {
-        if (!data || !id || id === myViewerId) return;
-        if (typeof data.lat !== 'number' || typeof data.lon !== 'number') return;
-        if (Date.now() - (data.t || 0) > 120000) return;
-        liveViewers[id] = {
-          id,
-          call: data.call || 'VISITOR',
-          lat: data.lat,
-          lon: data.lon,
-          color: data.color || hashHue(id),
-          t: data.t || Date.now(),
-          self: false
-        };
-        renderViewersHud();
-      });
-    }
-  } catch (e) {}
-  publishMyPresence();
-  setInterval(publishMyPresence, 12000);
-  setInterval(() => { pruneViewers(); renderViewersHud(); }, 15000);
-}
-
-function renderViewersHud() {
-  pruneViewers();
-  const list = document.getElementById('viewersList');
-  const cnt = document.getElementById('viewerCount');
-  if (!list) return;
-  const arr = Object.values(liveViewers).sort((a, b) => (b.self ? 1 : 0) - (a.self ? 1 : 0));
-  if (cnt) cnt.textContent = String(arr.length);
-  list.innerHTML = arr.slice(0, 12).map(v =>
-    `<div class="vhRow"><span class="vhDot" style="background:${v.color}"></span>` +
-    `<span>${v.self ? '<strong>YOU</strong> · ' : ''}${v.call || 'VISITOR'}</span></div>`
-  ).join('') || '<div class="vhRow">Only you on Hamdash2 right now</div>';
-}
-
-function drawLiveViewers() {
-  if (!projection) return;
-  const dpr = canvasPixelRatio();
-  Object.values(liveViewers).forEach(v => {
-    const p = projection([v.lon, v.lat]);
-    if (!p) return;
-    // soft pulse
-    const phase = ((Date.now() / 1000) + (v.id.charCodeAt(2) || 0)) % 2;
-    const pulse = 1 + 0.15 * Math.sin(phase * Math.PI);
-    mapCtx.beginPath();
-    mapCtx.arc(p[0], p[1], 6 * dpr * pulse, 0, Math.PI * 2);
-    mapCtx.fillStyle = v.color;
-    mapCtx.globalAlpha = v.self ? 0.95 : 0.8;
-    mapCtx.fill();
-    mapCtx.globalAlpha = 1;
-    mapCtx.beginPath();
-    mapCtx.arc(p[0], p[1], 11 * dpr, 0, Math.PI * 2);
-    mapCtx.strokeStyle = v.color;
-    mapCtx.globalAlpha = 0.45;
-    mapCtx.lineWidth = 1.5 * dpr;
-    mapCtx.stroke();
-    mapCtx.globalAlpha = 1;
-    if (!perfMode) {
-      mapCtx.font = `bold ${10 * dpr}px JetBrains Mono, monospace`;
-      mapCtx.fillStyle = v.color;
-      mapCtx.fillText(v.self ? 'YOU' : (v.call || 'VISITOR'), p[0] + 10 * dpr, p[1] - 4 * dpr);
-    }
-  });
-}
-
 function boot() {
   applyPerfMode();
   applyStation();
   if (!localStorage.getItem('hmc_station')) openSetup();
   else closeSetup();
+
+  fetchRoadsterJpl();
+  setInterval(fetchRoadsterJpl, 30 * 60 * 1000);
+  setInterval(updateRoadsterHud, 5000);
 
   initWxCityPicker();
   initCountdown();
