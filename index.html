@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
 <style>
 :root {
   --ink: #f0f4f8;
@@ -790,6 +791,60 @@ body.perfMode #mapCanvas { opacity: 0.9; }
 
 /* Map arcs / spots overlay handled in canvas */
 
+
+/* Roadster + live viewers HUD */
+#roadsterHud, #viewersHud {
+  position: absolute;
+  z-index: 18;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  backdrop-filter: blur(12px);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  line-height: 1.45;
+  max-width: 260px;
+  pointer-events: none;
+}
+#roadsterHud {
+  bottom: 58px;
+  left: 16px;
+  border-color: rgba(255, 90, 90, 0.35);
+}
+#viewersHud {
+  bottom: 58px;
+  right: 16px;
+  min-width: 140px;
+}
+#roadsterHud .rhTitle, #viewersHud .vhTitle {
+  color: var(--amber);
+  font-weight: 700;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+#roadsterHud .rhTitle { color: #ff7a6a; }
+#roadsterHud strong, #viewersHud strong { color: var(--cyan); font-weight: 600; }
+#viewersHud .vhRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+#viewersHud .vhDot {
+  width: 8px; height: 8px; border-radius: 50%;
+  flex: 0 0 auto;
+}
+@media (max-width: 1100px) {
+  #roadsterHud, #viewersHud {
+    position: relative;
+    bottom: auto; left: auto; right: auto;
+    margin: 8px 12px;
+    max-width: none;
+  }
+}
+
 .toast {
   position: absolute;
   top: 100px; left: 50%;
@@ -1112,6 +1167,16 @@ body.perfMode #mapCanvas { opacity: 0.9; }
     <div id="dxScroll"><div id="dxTrack"></div></div>
   </div>
 
+  
+  <div id="roadsterHud">
+    <div class="rhTitle">Tesla Roadster · Starman</div>
+    <div id="roadsterHudBody">Loading JPL Horizons…</div>
+  </div>
+  <div id="viewersHud">
+    <div class="vhTitle">Live viewers · <strong id="viewerCount">1</strong></div>
+    <div id="viewersList"></div>
+  </div>
+
   <div class="toast" id="toast"></div>
 </div>
 
@@ -1385,6 +1450,7 @@ function applyStation() {
   document.title = station.call + ' Mission Control';
   if (typeof updateSatPanel === 'function') updateSatPanel();
   if (typeof renderCelestial === 'function') renderCelestial();
+  if (typeof publishMyPresence === 'function') publishMyPresence();
   if (typeof tickCountdown === 'function') tickCountdown();
 }
 
@@ -3309,15 +3375,19 @@ const SOLAR_BODIES = [
   { name: 'Ura', a: 19.19, period: 30689, color: '#7ec8e3', r: 3.5 },
   { name: 'Nep', a: 30.07, period: 60190, color: '#5b7cfa', r: 3.5 }
 ];
+/* NASA/JPL Horizons ID -143205 · solution #11 · peri~0.986 AU aph~1.66 AU · P~557 d */
 const ROADSTER = {
   name: 'Roadster',
   a: 1.325,
   e: 0.2558,
   period: 557.0,
   i: 1.077,
-  epoch: Date.UTC(2018, 1, 8),
-  m0: 0.4
+  epoch: Date.UTC(2018, 1, 6, 20, 45),
+  m0: 0.4,
+  jplId: '-143205'
 };
+let roadsterLive = null; // { rAu, earthAu, speedKms, source, updated }
+
 function bodyAnomaly(periodDays, epochMs, nowMs) {
   const days = (nowMs - (epochMs || Date.UTC(2000, 0, 1))) / 86400000;
   let a = (2 * Math.PI * (days / periodDays)) % (2 * Math.PI);
@@ -3331,37 +3401,122 @@ function roadsterState(now = new Date()) {
   const E = solveE(M, ROADSTER.e);
   const cosE = Math.cos(E), sinE = Math.sin(E);
   const nu = Math.atan2(Math.sqrt(1 - ROADSTER.e * ROADSTER.e) * sinE, cosE - ROADSTER.e);
-  const r = ROADSTER.a * (1 - ROADSTER.e * cosE);
+  let r = ROADSTER.a * (1 - ROADSTER.e * cosE);
   const mu = 1.327e11;
   const a_km = ROADSTER.a * 1.496e8;
-  const r_km = r * 1.496e8;
-  const v = Math.sqrt(mu * (2 / r_km - 1 / a_km));
+  let r_km = r * 1.496e8;
+  let v = Math.sqrt(mu * (2 / r_km - 1 / a_km));
+  if (roadsterLive && roadsterLive.rAu) {
+    r = roadsterLive.rAu;
+    r_km = r * 1.496e8;
+    if (roadsterLive.speedKms) v = roadsterLive.speedKms;
+  }
   const peri = ROADSTER.a * (1 - ROADSTER.e);
   const aph = ROADSTER.a * (1 + ROADSTER.e);
   const ageYears = days / 365.25;
-  // heliocentric lon ~ true anomaly + peri approx
+  const orbits = days / ROADSTER.period;
   const helioLon = (nu * 180 / Math.PI + 30) % 360;
-  return { r, nu, v, peri, aph, ageYears, M, helioLon };
+  const earthAu = roadsterLive && roadsterLive.earthAu != null ? roadsterLive.earthAu : null;
+  return { r, nu, v, peri, aph, ageYears, orbits, M, helioLon, earthAu, days };
 }
 function earthHelioLonDeg(date = new Date()) {
-  // approx solar longitude of Earth (mean)
   const start = Date.UTC(date.getUTCFullYear(), 0, 0);
   const day = (date.getTime() - start) / 86400000;
   return (280.147 + 0.9856474 * day) % 360;
 }
-/** Place a heliocentric body on the sky behind Earth; factor sets distance outside disc */
 function projectHelioOnSky(helioLonDeg, eclLat, factor) {
   const earthL = earthHelioLonDeg();
-  // Elongation from Sun as seen from Earth (simple 1-D ecliptic)
   let elong = ((helioLonDeg - earthL) % 360 + 360) % 360;
   if (elong > 180) elong -= 360;
-  // Sun is opposite Earth's heliocentric longitude on the sky ~ earthL+180
   const sunSkyLon = (earthL + 180) % 360;
   let skyLon = (sunSkyLon + elong + 360) % 360;
   if (skyLon > 180) skyLon -= 360;
-  // Ecliptic tilt ~23.4° for band feel
   const skyLat = eclLat + 23.4 * Math.sin(skyLon * Math.PI / 180) * 0.15;
   return projectAlt(skyLon, skyLat, factor);
+}
+
+async function fetchRoadsterJpl() {
+  const day = new Date().toISOString().slice(0, 10);
+  const next = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const q = new URLSearchParams({
+    format: 'text',
+    COMMAND: "'-143205'",
+    MAKE_EPHEM: 'YES',
+    EPHEM_TYPE: 'VECTORS',
+    CENTER: "'500@10'",
+    START_TIME: "'" + day + "'",
+    STOP_TIME: "'" + next + "'",
+    STEP_SIZE: "'1 d'",
+    OUT_UNITS: 'AU-D'
+  });
+  const primary = 'https://ssd.jpl.nasa.gov/api/horizons.api?' + q.toString();
+  const urls = [
+    primary,
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent(primary)
+  ];
+  for (const url of urls) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const text = await res.text();
+      const m = text.match(/X =\s*([-\d.E+]+)\s*Y =\s*([-\d.E+]+)\s*Z =\s*([-\d.E+]+)\s*[\s\S]*?VX=\s*([-\d.E+]+)\s*VY=\s*([-\d.E+]+)\s*VZ=\s*([-\d.E+]+)\s*[\s\S]*?RG=\s*([-\d.E+]+)/i);
+      if (!m) continue;
+      const X = parseFloat(m[1]), Y = parseFloat(m[2]), Z = parseFloat(m[3]);
+      const VX = parseFloat(m[4]), VY = parseFloat(m[5]), VZ = parseFloat(m[6]);
+      const RG = parseFloat(m[7]);
+      const speedAuD = Math.sqrt(VX*VX + VY*VY + VZ*VZ);
+      const speedKms = speedAuD * 149597870.7 / 86400;
+      // Earth distance: second query optional — estimate from vector vs Earth later
+      roadsterLive = {
+        rAu: RG,
+        speedKms,
+        x: X, y: Y, z: Z,
+        source: 'NASA/JPL Horizons · -143205',
+        updated: Date.now()
+      };
+      // Earth-centered distance
+      try {
+        const qE = new URLSearchParams({
+          format: 'text', COMMAND: "'-143205'", MAKE_EPHEM: 'YES', EPHEM_TYPE: 'VECTORS',
+          CENTER: "'500@399'", START_TIME: "'" + day + "'", STOP_TIME: "'" + next + "'",
+          STEP_SIZE: "'1 d'", OUT_UNITS: 'AU-D'
+        });
+        const uE = 'https://ssd.jpl.nasa.gov/api/horizons.api?' + qE.toString();
+        const r2 = await fetch(uE).catch(() => null);
+        if (r2 && r2.ok) {
+          const t2 = await r2.text();
+          const m2 = t2.match(/RG=\s*([-\d.E+]+)/i);
+          if (m2) roadsterLive.earthAu = parseFloat(m2[1]);
+        }
+      } catch (e) {}
+      updateRoadsterHud();
+      return;
+    } catch (e) { /* next */ }
+  }
+  updateRoadsterHud();
+}
+
+function updateRoadsterHud() {
+  const el = document.getElementById('roadsterHudBody');
+  if (!el) return;
+  const rs = roadsterState();
+  const rAu = rs.r;
+  const v = rs.v;
+  const earthAu = rs.earthAu;
+  const earthKm = earthAu != null ? earthAu * 149597870.7 : null;
+  const sunKm = rAu * 149597870.7;
+  const lightMin = earthKm != null ? (earthKm / 299792.458) / 60 : null;
+  el.innerHTML =
+    `<div>Sun <strong>${rAu.toFixed(3)} AU</strong> · <strong>${(sunKm/1e6).toFixed(1)} M km</strong></div>` +
+    (earthKm != null
+      ? `<div>Earth <strong>${earthAu.toFixed(3)} AU</strong> · <strong>${(earthKm/1e6).toFixed(1)} M km</strong></div>`
+      : `<div>Earth <strong>—</strong> (JPL range pending)</div>`) +
+    `<div>Speed <strong>${v.toFixed(2)} km/s</strong> · <strong>${(v*3600).toFixed(0)} km/h</strong></div>` +
+    (lightMin != null ? `<div>Light-time <strong>${lightMin.toFixed(1)} min</strong></div>` : '') +
+    `<div>Orbit <strong>${rs.peri.toFixed(3)}–${rs.aph.toFixed(3)} AU</strong> · P <strong>${ROADSTER.period.toFixed(0)} d</strong></div>` +
+    `<div>Laps <strong>${rs.orbits.toFixed(2)}</strong> · in space <strong>${rs.ageYears.toFixed(2)} yr</strong></div>` +
+    `<div>Launch <strong>2018-02-06</strong> Falcon Heavy · Starman</div>` +
+    `<div style="margin-top:3px;color:var(--faint);font-size:9px;">Source: ${roadsterLive && roadsterLive.source ? roadsterLive.source : 'Kepler approx · JPL -143205'}</div>`;
 }
 
 function drawSolarSystemSky(w, h, dpr) {
@@ -3371,7 +3526,6 @@ function drawSolarSystemSky(w, h, dpr) {
   const sunSkyLon = ((earthL + 180) % 360);
   const sunLon = sunSkyLon > 180 ? sunSkyLon - 360 : sunSkyLon;
 
-  // Ecliptic guide (faint)
   if (!perfMode) {
     const eclPts = [];
     for (let lon = -180; lon <= 180; lon += 6) {
@@ -3381,7 +3535,6 @@ function drawSolarSystemSky(w, h, dpr) {
     skyStroke(eclPts, 'rgba(255, 210, 120, 0.12)', 1.0);
   }
 
-  // Sun (outside Earth disc, tracks globe rotation)
   const sunP = projectAlt(sunLon, 5, 1.62);
   if (sunP) {
     const R = 10 * dpr;
@@ -3404,13 +3557,11 @@ function drawSolarSystemSky(w, h, dpr) {
     }
   }
 
-  // Planets (skip Earth marker on sky — we are on Earth)
   const tMs = now.getTime();
   SOLAR_BODIES.forEach(b => {
     if (b.name === 'Ear') return;
     const ang = bodyAnomaly(b.period, Date.UTC(2000, 0, 1), tMs);
     const helioLon = (ang * 180 / Math.PI) % 360;
-    // Outer planets slightly farther outside disc
     const fac = 1.48 + Math.min(0.35, Math.log10(b.a + 1) * 0.25);
     const p = projectHelioOnSky(helioLon, 0, fac);
     if (!p) return;
@@ -3425,7 +3576,6 @@ function drawSolarSystemSky(w, h, dpr) {
     }
   });
 
-  // Tesla Roadster
   const rs = roadsterState(now);
   const rp = projectHelioOnSky(rs.helioLon, ROADSTER.i * Math.sin(rs.nu), 1.52);
   if (rp) {
@@ -3447,8 +3597,6 @@ function drawSolarSystemSky(w, h, dpr) {
       mapCtx.fillText(rs.r.toFixed(2) + ' AU · ' + rs.v.toFixed(1) + ' km/s', rp[0] + 8 * dpr, rp[1] + 8 * dpr);
     }
   }
-
-  // Roadster orbit path sample on sky (faint)
   if (!perfMode) {
     const pathPts = [];
     for (let i = 0; i <= 48; i++) {
@@ -3459,6 +3607,148 @@ function drawSolarSystemSky(w, h, dpr) {
     }
     skyStroke(pathPts, 'rgba(255, 80, 80, 0.22)', 1.0);
   }
+}
+
+/* ─── Live page viewers on the globe (unique colors) ─── */
+const VIEWER_COLORS = [
+  '#3ee6ff', '#ff6b9d', '#c4f542', '#ffb627', '#a78bfa',
+  '#34d399', '#fb7185', '#38bdf8', '#fbbf24', '#e879f9',
+  '#2dd4bf', '#f97316', '#818cf8', '#4ade80', '#f472b6'
+];
+function hashHue(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+  return VIEWER_COLORS[h % VIEWER_COLORS.length];
+}
+function getViewerId() {
+  let id = localStorage.getItem('hmc_viewer_id');
+  if (!id) {
+    id = 'v_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+    localStorage.setItem('hmc_viewer_id', id);
+  }
+  return id;
+}
+const myViewerId = getViewerId();
+const myViewerColor = hashHue(myViewerId);
+/** @type {Record<string, {id:string,call:string,lat:number,lon:number,color:string,t:number,self?:boolean}>} */
+let liveViewers = {};
+
+function publishMyPresence() {
+  const payload = {
+    id: myViewerId,
+    call: (station && station.call) || 'VISITOR',
+    lat: station.lat,
+    lon: station.lon,
+    color: myViewerColor,
+    t: Date.now(),
+    self: true
+  };
+  liveViewers[myViewerId] = payload;
+  try {
+    if (window.__hmcBc) window.__hmcBc.postMessage({ type: 'presence', viewer: { ...payload, self: false } });
+  } catch (e) {}
+  try {
+    if (window.__hmcGun) {
+      window.__hmcGun.get('hmc-viewers').get(myViewerId).put({
+        id: myViewerId,
+        call: payload.call,
+        lat: payload.lat,
+        lon: payload.lon,
+        color: payload.color,
+        t: payload.t
+      });
+    }
+  } catch (e) {}
+  renderViewersHud();
+}
+
+function pruneViewers() {
+  const now = Date.now();
+  Object.keys(liveViewers).forEach(id => {
+    if (id === myViewerId) return;
+    if (now - (liveViewers[id].t || 0) > 90000) delete liveViewers[id];
+  });
+}
+
+function initPresence() {
+  try {
+    const bc = new BroadcastChannel('hmc-presence');
+    window.__hmcBc = bc;
+    bc.onmessage = (ev) => {
+      const msg = ev.data;
+      if (!msg || msg.type !== 'presence' || !msg.viewer) return;
+      if (msg.viewer.id === myViewerId) return;
+      liveViewers[msg.viewer.id] = { ...msg.viewer, self: false, t: Date.now() };
+      renderViewersHud();
+    };
+  } catch (e) {}
+  try {
+    if (typeof Gun !== 'undefined') {
+      const gun = Gun(['https://gun-manhattan.herokuapp.com/gun', 'https://gun-us.herokuapp.com/gun']);
+      window.__hmcGun = gun;
+      gun.get('hmc-viewers').map().on((data, id) => {
+        if (!data || !id || id === myViewerId) return;
+        if (typeof data.lat !== 'number' || typeof data.lon !== 'number') return;
+        if (Date.now() - (data.t || 0) > 120000) return;
+        liveViewers[id] = {
+          id,
+          call: data.call || 'VISITOR',
+          lat: data.lat,
+          lon: data.lon,
+          color: data.color || hashHue(id),
+          t: data.t || Date.now(),
+          self: false
+        };
+        renderViewersHud();
+      });
+    }
+  } catch (e) {}
+  publishMyPresence();
+  setInterval(publishMyPresence, 12000);
+  setInterval(() => { pruneViewers(); renderViewersHud(); }, 15000);
+}
+
+function renderViewersHud() {
+  pruneViewers();
+  const list = document.getElementById('viewersList');
+  const cnt = document.getElementById('viewerCount');
+  if (!list) return;
+  const arr = Object.values(liveViewers).sort((a, b) => (b.self ? 1 : 0) - (a.self ? 1 : 0));
+  if (cnt) cnt.textContent = String(arr.length);
+  list.innerHTML = arr.slice(0, 12).map(v =>
+    `<div class="vhRow"><span class="vhDot" style="background:${v.color}"></span>` +
+    `<span>${v.self ? '<strong>YOU</strong> · ' : ''}${v.call || 'VISITOR'}</span></div>`
+  ).join('') || '<div class="vhRow">Only you right now</div>';
+}
+
+function drawLiveViewers() {
+  if (!projection) return;
+  const dpr = canvasPixelRatio();
+  Object.values(liveViewers).forEach(v => {
+    const p = projection([v.lon, v.lat]);
+    if (!p) return;
+    // soft pulse
+    const phase = ((Date.now() / 1000) + (v.id.charCodeAt(2) || 0)) % 2;
+    const pulse = 1 + 0.15 * Math.sin(phase * Math.PI);
+    mapCtx.beginPath();
+    mapCtx.arc(p[0], p[1], 6 * dpr * pulse, 0, Math.PI * 2);
+    mapCtx.fillStyle = v.color;
+    mapCtx.globalAlpha = v.self ? 0.95 : 0.8;
+    mapCtx.fill();
+    mapCtx.globalAlpha = 1;
+    mapCtx.beginPath();
+    mapCtx.arc(p[0], p[1], 11 * dpr, 0, Math.PI * 2);
+    mapCtx.strokeStyle = v.color;
+    mapCtx.globalAlpha = 0.45;
+    mapCtx.lineWidth = 1.5 * dpr;
+    mapCtx.stroke();
+    mapCtx.globalAlpha = 1;
+    if (!perfMode) {
+      mapCtx.font = `bold ${10 * dpr}px JetBrains Mono, monospace`;
+      mapCtx.fillStyle = v.color;
+      mapCtx.fillText(v.self ? 'YOU' : (v.call || 'VISITOR'), p[0] + 10 * dpr, p[1] - 4 * dpr);
+    }
+  });
 }
 
 function boot() {
