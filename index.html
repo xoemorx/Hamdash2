@@ -1852,23 +1852,41 @@ async function fetchBandConditions() {
     { key: '17m-15m', label: '17' },
     { key: '17m-15m', label: '15' },
     { key: '12m-10m', label: '12' },
+    { key: 'cb', label: 'CB' },
     { key: '12m-10m', label: '10' },
-    { key: '6m', label: '6m' },
-    { key: 'cb', label: 'CB' }
+    { key: '6m', label: '6m' }
   ];
 
   const period = day ? 'day' : 'night';
   const tiles = document.getElementById('bandTiles');
   const { muf: mufEst, luf: lufEst } = estimateMufLuf(sfi, kp, day, station.lat);
-  // CB (27 MHz) — not in HamQSL; estimate from MUF/LUF like 10/11m
-  const cbCond = (() => {
-    const mhz = 27.2;
+  const estMhz = (mhz) => {
     if (mhz < lufEst) return 'poor';
     if (mhz > mufEst) return 'poor';
     if (mhz > mufEst * 0.85) return 'fair';
     return 'good';
-  })();
+  };
+  // CB is 11m (~27 MHz) — sit between 12m and 10m. Prefer HamQSL 12m-10m
+  // so CB cannot show worse than both neighbors.
+  const rank = { good: 2, fair: 1, poor: 0, unknown: -1 };
+  const unrank = (n) => (n >= 2 ? 'good' : n >= 1 ? 'fair' : n >= 0 ? 'poor' : 'unknown');
+  const cbFromNeighbors = (c12_10, c12est, c10est) => {
+    if (c12_10 && c12_10 !== 'unknown') return c12_10; // same HamQSL bucket as 12/10
+    // fallback: never worse than the better of estimated 12/10, never better than the worse
+    const a = rank[c12est] ?? -1;
+    const b = rank[c10est] ?? -1;
+    if (a < 0 && b < 0) return estMhz(27.2);
+    const lo = Math.min(a < 0 ? b : a, b < 0 ? a : b);
+    const hi = Math.max(a, b);
+    // 11m ~ midpoint; use the better of the two only if both open, else the shared level
+    return unrank(lo < 0 ? hi : lo);
+  };
   if (bands) {
+    const raw1210 = bands['12m-10m']
+      ? (bands['12m-10m'][period] || bands['12m-10m'].day || bands['12m-10m'].night)
+      : null;
+    const c1210 = normalizeCond(raw1210);
+    const cbCond = cbFromNeighbors(c1210, estMhz(24.9), estMhz(28.4));
     bands['cb'] = { day: cbCond, night: cbCond };
     tiles.innerHTML = order.map(o => {
       const raw = bands[o.key] ? (bands[o.key][period] || bands[o.key].day || bands[o.key].night) : null;
@@ -1876,26 +1894,22 @@ async function fetchBandConditions() {
       return `<div class="bandTile ${c}"><div class="bn">${o.label}</div><div class="bc">${condLabel(c)}</div></div>`;
     }).join('');
   } else {
-    const est = (mhz) => {
-      if (mhz < lufEst) return 'poor';
-      if (mhz > mufEst) return 'poor';
-      if (mhz > mufEst * 0.85) return 'fair';
-      return 'good';
-    };
+    const c12 = estMhz(24.9);
+    const c10 = estMhz(28.4);
+    const cbCond = cbFromNeighbors(null, c12, c10);
     const fallback = [
-      { label: '80', mhz: 3.7 },
-      { label: '40', mhz: 7.1 },
-      { label: '20', mhz: 14.2 },
-      { label: '17', mhz: 18.1 },
-      { label: '15', mhz: 21.2 },
-      { label: '12', mhz: 24.9 },
-      { label: '10', mhz: 28.4 },
-      { label: '6m', mhz: 50.1 },
-      { label: 'CB', mhz: 27.2 }
+      { label: '80', c: estMhz(3.7) },
+      { label: '40', c: estMhz(7.1) },
+      { label: '20', c: estMhz(14.2) },
+      { label: '17', c: estMhz(18.1) },
+      { label: '15', c: estMhz(21.2) },
+      { label: '12', c: c12 },
+      { label: '10', c: c10 },
+      { label: '6m', c: estMhz(50.1) },
+      { label: 'CB', c: cbCond }
     ];
     tiles.innerHTML = fallback.map(b => {
-      const c = est(b.mhz);
-      return `<div class="bandTile ${c}"><div class="bn">${b.label}</div><div class="bc">${condLabel(c)}</div></div>`;
+      return `<div class="bandTile ${b.c}"><div class="bn">${b.label}</div><div class="bc">${condLabel(b.c)}</div></div>`;
     }).join('');
   }
 
