@@ -440,8 +440,8 @@ html, body {
 .card.space { width: 150px; flex: 0 0 150px; }
 .card.passes { flex: 1 1 200px; min-width: 180px; max-width: 280px; }
 .card.bands { flex: 1 1 180px; min-width: 160px; max-width: 260px; }
-.card.countdown { flex: 1 1 240px; min-width: 220px; max-width: 300px; }
-.card.celestial { flex: 1 1 240px; min-width: 220px; max-width: 320px; }
+.card.countdown { flex: 1 1 220px; min-width: 190px; max-width: 300px; }
+.card.celestial { flex: 1 1 220px; min-width: 190px; max-width: 300px; }
 .cdTarget {
   font-family: var(--mono);
   font-size: 12px;
@@ -790,6 +790,43 @@ body.perfMode #mapCanvas { opacity: 0.9; }
 
 /* Map arcs / spots overlay handled in canvas */
 
+
+/* Starman / Roadster telemetry HUD */
+#roadsterHud {
+  position: absolute;
+  z-index: 18;
+  background: var(--panel);
+  border: 1px solid rgba(255, 90, 90, 0.35);
+  border-radius: 10px;
+  padding: 8px 10px;
+  backdrop-filter: blur(12px);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--dim);
+  line-height: 1.45;
+  max-width: 280px;
+  pointer-events: none;
+  bottom: 58px;
+  left: 16px;
+}
+#roadsterHud .rhTitle {
+  color: #ff7a6a;
+  font-weight: 700;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+#roadsterHud strong { color: var(--cyan); font-weight: 600; }
+#roadsterHud a { pointer-events: auto; }
+@media (max-width: 1100px) {
+  #roadsterHud {
+    position: relative;
+    bottom: auto; left: auto; right: auto;
+    margin: 8px 12px;
+    max-width: none;
+  }
+}
+
+
 .toast {
   position: absolute;
   top: 100px; left: 50%;
@@ -1110,6 +1147,12 @@ body.perfMode #mapCanvas { opacity: 0.9; }
   <div id="dxTicker">
     <div class="dxLabel">DX Cluster</div>
     <div id="dxScroll"><div id="dxTrack"></div></div>
+  </div>
+
+  
+  <div id="roadsterHud">
+    <div class="rhTitle">Starman · Tesla Roadster · telemetry</div>
+    <div id="roadsterHudBody">Loading whereisroadster.com…</div>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -1801,44 +1844,72 @@ async function fetchBandConditions() {
     } catch (e) { /* try next proxy */ }
   }
 
-  // Display order matching common HF + 6m
+  // Display: HF bands + 17/12 split out + CB (11m) + 6m
   const order = [
     { key: '80m-40m', label: '80' },
-    { key: '30m-20m', label: '30/20' },
-    { key: '17m-15m', label: '17/15' },
-    { key: '12m-10m', label: '12/10' },
+    { key: '80m-40m', label: '40' },
+    { key: '30m-20m', label: '20' },
+    { key: '17m-15m', label: '17' },
+    { key: '17m-15m', label: '15' },
+    { key: '12m-10m', label: '12' },
+    { key: 'cb', label: 'CB' },
+    { key: '12m-10m', label: '10' },
     { key: '6m', label: '6m' }
   ];
 
-  // HamQSL uses names like "80m-40m", "30m-20m", etc.
   const period = day ? 'day' : 'night';
   const tiles = document.getElementById('bandTiles');
+  const { muf: mufEst, luf: lufEst } = estimateMufLuf(sfi, kp, day, station.lat);
+  const estMhz = (mhz) => {
+    if (mhz < lufEst) return 'poor';
+    if (mhz > mufEst) return 'poor';
+    if (mhz > mufEst * 0.85) return 'fair';
+    return 'good';
+  };
+  // CB is 11m (~27 MHz) — sit between 12m and 10m. Prefer HamQSL 12m-10m
+  // so CB cannot show worse than both neighbors.
+  const rank = { good: 2, fair: 1, poor: 0, unknown: -1 };
+  const unrank = (n) => (n >= 2 ? 'good' : n >= 1 ? 'fair' : n >= 0 ? 'poor' : 'unknown');
+  const cbFromNeighbors = (c12_10, c12est, c10est) => {
+    if (c12_10 && c12_10 !== 'unknown') return c12_10; // same HamQSL bucket as 12/10
+    // fallback: never worse than the better of estimated 12/10, never better than the worse
+    const a = rank[c12est] ?? -1;
+    const b = rank[c10est] ?? -1;
+    if (a < 0 && b < 0) return estMhz(27.2);
+    const lo = Math.min(a < 0 ? b : a, b < 0 ? a : b);
+    const hi = Math.max(a, b);
+    // 11m ~ midpoint; use the better of the two only if both open, else the shared level
+    return unrank(lo < 0 ? hi : lo);
+  };
   if (bands) {
+    const raw1210 = bands['12m-10m']
+      ? (bands['12m-10m'][period] || bands['12m-10m'].day || bands['12m-10m'].night)
+      : null;
+    const c1210 = normalizeCond(raw1210);
+    const cbCond = cbFromNeighbors(c1210, estMhz(24.9), estMhz(28.4));
+    bands['cb'] = { day: cbCond, night: cbCond };
     tiles.innerHTML = order.map(o => {
       const raw = bands[o.key] ? (bands[o.key][period] || bands[o.key].day || bands[o.key].night) : null;
-      const c = normalizeCond(raw);
+      const c = o.key === 'cb' ? cbCond : normalizeCond(raw);
       return `<div class="bandTile ${c}"><div class="bn">${o.label}</div><div class="bc">${condLabel(c)}</div></div>`;
     }).join('');
   } else {
-    // fallback estimate from SFI/Kp alone
-    const est = (mhz) => {
-      const { muf, luf } = estimateMufLuf(sfi, kp, day, station.lat);
-      if (mhz < luf) return 'poor';
-      if (mhz > muf) return 'poor';
-      if (mhz > muf * 0.85) return 'fair';
-      return 'good';
-    };
+    const c12 = estMhz(24.9);
+    const c10 = estMhz(28.4);
+    const cbCond = cbFromNeighbors(null, c12, c10);
     const fallback = [
-      { label: '80', mhz: 3.7 },
-      { label: '40', mhz: 7.1 },
-      { label: '20', mhz: 14.2 },
-      { label: '15', mhz: 21.2 },
-      { label: '10', mhz: 28.4 },
-      { label: '6m', mhz: 50.1 }
+      { label: '80', c: estMhz(3.7) },
+      { label: '40', c: estMhz(7.1) },
+      { label: '20', c: estMhz(14.2) },
+      { label: '17', c: estMhz(18.1) },
+      { label: '15', c: estMhz(21.2) },
+      { label: '12', c: c12 },
+      { label: '10', c: c10 },
+      { label: '6m', c: estMhz(50.1) },
+      { label: 'CB', c: cbCond }
     ];
     tiles.innerHTML = fallback.map(b => {
-      const c = est(b.mhz);
-      return `<div class="bandTile ${c}"><div class="bn">${b.label}</div><div class="bc">${condLabel(c)}</div></div>`;
+      return `<div class="bandTile ${b.c}"><div class="bn">${b.label}</div><div class="bc">${condLabel(b.c)}</div></div>`;
     }).join('');
   }
 
@@ -2043,7 +2114,7 @@ function toggleOnAir() {
   onAir = !onAir;
   document.getElementById('rigDot').classList.toggle('on', onAir);
   document.getElementById('onAirBtn').classList.toggle('active', onAir);
-  document.getElementById('rigFreq').textContent = onAir ? '14.074 · FT8' : '— · —';
+  document.getElementById('rigFreq').textContent = onAir ? station.call : '— · —';
   if (onAir) showToast(station.call + ' is ON THE AIR');
 }
 document.getElementById('onAirBtn').addEventListener('click', toggleOnAir);
@@ -2442,150 +2513,68 @@ function drawMoon() {
 }
 
 /* Second Death Star — screen-fixed upper-right, slow axial spin */
-function drawDeathStar(w, h, dpr) {
-  // Stationary screen position: upper-right of the globe
-  const cx = w * 0.78;
-  const cy = h * 0.20;
-  const R = Math.min(w, h) * (perfMode ? 0.055 : 0.07);
-  // Slow rotation (~1 rev / 90s)
-  const spin = (Date.now() / 90000) * Math.PI * 2;
-
-  mapCtx.save();
-  mapCtx.translate(cx, cy);
-
-  // Soft space glow behind it
-  const glow = mapCtx.createRadialGradient(0, 0, R * 0.5, 0, 0, R * 2.2);
-  glow.addColorStop(0, 'rgba(80, 100, 120, 0.12)');
-  glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-  mapCtx.fillStyle = glow;
-  mapCtx.beginPath();
-  mapCtx.arc(0, 0, R * 2.2, 0, Math.PI * 2);
-  mapCtx.fill();
-
-  // Main sphere body
-  const body = mapCtx.createRadialGradient(-R * 0.35, -R * 0.4, R * 0.1, 0, 0, R);
-  body.addColorStop(0, '#6a727c');
-  body.addColorStop(0.45, '#3a414a');
-  body.addColorStop(1, '#15181c');
-  mapCtx.beginPath();
-  mapCtx.arc(0, 0, R, 0, Math.PI * 2);
-  mapCtx.fillStyle = body;
-  mapCtx.fill();
-
-  // Clip to sphere for surface detail
+function drawAurora(dpr) {
+  if (!projection || !pathGen) return;
+  // Soft polar auroral ovals — geomagnetic ~65–70° lat bands
+  const t = Date.now() / 1000;
+  const ovals = [
+    { lat: 68, color: 'rgba(40, 255, 140, 0.18)', color2: 'rgba(120, 255, 200, 0.08)', phase: 0 },
+    { lat: -68, color: 'rgba(40, 255, 140, 0.16)', color2: 'rgba(180, 120, 255, 0.07)', phase: 1.2 },
+    { lat: 72, color: 'rgba(255, 120, 200, 0.1)', color2: 'rgba(80, 255, 180, 0.05)', phase: 0.6 },
+    { lat: -72, color: 'rgba(255, 100, 180, 0.09)', color2: 'rgba(100, 200, 255, 0.05)', phase: 2.0 }
+  ];
   mapCtx.save();
   mapCtx.beginPath();
-  mapCtx.arc(0, 0, R, 0, Math.PI * 2);
+  pathGen({ type: 'Sphere' });
   mapCtx.clip();
-
-  // Surface panel lattice (rotates)
-  mapCtx.strokeStyle = 'rgba(20, 24, 28, 0.55)';
-  mapCtx.lineWidth = 0.7 * dpr;
-  const panels = perfMode ? 8 : 14;
-  for (let i = -panels; i <= panels; i++) {
-    const y = (i / panels) * R;
-    const half = Math.sqrt(Math.max(0, R * R - y * y));
+  ovals.forEach((ov, idx) => {
+    const pts = [];
+    const n = perfMode ? 36 : 64;
+    for (let i = 0; i <= n; i++) {
+      const lon = (i / n) * 360 - 180;
+      // mild wavy boundary
+      const wobble = 2.5 * Math.sin((lon * Math.PI / 180) * 3 + t * 0.35 + ov.phase)
+        + 1.2 * Math.sin((lon * Math.PI / 180) * 7 + t * 0.55);
+      const lat = ov.lat + wobble * (ov.lat > 0 ? 1 : -1) * 0.35;
+      const p = projection([lon, lat]);
+      if (p) pts.push(p);
+    }
+    if (pts.length < 4) return;
     mapCtx.beginPath();
-    mapCtx.moveTo(-half, y);
-    mapCtx.lineTo(half, y);
+    pts.forEach((p, i) => { if (i === 0) mapCtx.moveTo(p[0], p[1]); else mapCtx.lineTo(p[0], p[1]); });
+    mapCtx.closePath();
+    mapCtx.strokeStyle = ov.color;
+    mapCtx.lineWidth = (perfMode ? 3 : 5) * dpr;
+    mapCtx.shadowColor = ov.color2;
+    mapCtx.shadowBlur = perfMode ? 6 : 14;
+    mapCtx.stroke();
+    // inner thinner arc
+    mapCtx.lineWidth = (perfMode ? 1.5 : 2.5) * dpr;
+    mapCtx.strokeStyle = ov.color2;
+    mapCtx.stroke();
+  });
+  // Curtain streaks (fewer in perf mode)
+  const streaks = perfMode ? 4 : 10;
+  for (let i = 0; i < streaks; i++) {
+    const lon0 = ((i * 37 + t * 8) % 360) - 180;
+    const north = i % 2 === 0;
+    const lat0 = north ? 62 : -62;
+    const lat1 = north ? 78 : -78;
+    const p0 = projection([lon0, lat0]);
+    const p1 = projection([lon0 + 4 * Math.sin(t + i), lat1]);
+    if (!p0 || !p1) continue;
+    const g = mapCtx.createLinearGradient(p0[0], p0[1], p1[0], p1[1]);
+    g.addColorStop(0, 'rgba(40, 255, 150, 0)');
+    g.addColorStop(0.4, 'rgba(60, 255, 160, 0.22)');
+    g.addColorStop(1, 'rgba(200, 120, 255, 0)');
+    mapCtx.beginPath();
+    mapCtx.moveTo(p0[0], p0[1]);
+    mapCtx.lineTo(p1[0], p1[1]);
+    mapCtx.strokeStyle = g;
+    mapCtx.lineWidth = 2 * dpr;
+    mapCtx.shadowBlur = 0;
     mapCtx.stroke();
   }
-  for (let i = 0; i < panels; i++) {
-    const ang = spin + (i / panels) * Math.PI * 2;
-    mapCtx.beginPath();
-    mapCtx.moveTo(0, -R);
-    mapCtx.lineTo(Math.sin(ang) * R, Math.cos(ang) * R * 0.15);
-    mapCtx.lineTo(0, R);
-    mapCtx.stroke();
-  }
-
-  // Equatorial trench
-  mapCtx.beginPath();
-  mapCtx.ellipse(0, 0, R * 0.98, R * 0.12, 0, 0, Math.PI * 2);
-  mapCtx.strokeStyle = 'rgba(8, 10, 12, 0.85)';
-  mapCtx.lineWidth = 2.2 * dpr;
-  mapCtx.stroke();
-  mapCtx.beginPath();
-  mapCtx.ellipse(0, 0, R * 0.98, R * 0.06, 0, 0, Math.PI * 2);
-  mapCtx.strokeStyle = 'rgba(90, 100, 110, 0.35)';
-  mapCtx.lineWidth = 1 * dpr;
-  mapCtx.stroke();
-
-  // Superlaser dish (DS-II style, upper-left quadrant of the face)
-  const dishX = -R * 0.28 + Math.cos(spin) * R * 0.08;
-  const dishY = -R * 0.32 + Math.sin(spin * 0.7) * R * 0.05;
-  const dishR = R * 0.34;
-  mapCtx.beginPath();
-  mapCtx.arc(dishX, dishY, dishR, 0, Math.PI * 2);
-  mapCtx.fillStyle = 'rgba(12, 14, 18, 0.92)';
-  mapCtx.fill();
-  mapCtx.strokeStyle = 'rgba(100, 110, 120, 0.5)';
-  mapCtx.lineWidth = 1.2 * dpr;
-  mapCtx.stroke();
-  // Concentric dish rings
-  for (let k = 1; k <= 3; k++) {
-    mapCtx.beginPath();
-    mapCtx.arc(dishX, dishY, dishR * (k / 3.5), 0, Math.PI * 2);
-    mapCtx.strokeStyle = `rgba(70, 80, 90, ${0.25 + k * 0.08})`;
-    mapCtx.lineWidth = 0.8 * dpr;
-    mapCtx.stroke();
-  }
-  // Dim focusing crystal glint
-  mapCtx.beginPath();
-  mapCtx.arc(dishX, dishY, dishR * 0.08, 0, Math.PI * 2);
-  mapCtx.fillStyle = 'rgba(180, 210, 230, 0.35)';
-  mapCtx.fill();
-
-  // Incomplete northern hemisphere — scaffolding gap (Death Star II trademark)
-  // Cutaway wedge that rotates slowly
-  const gapA0 = spin * 0.35 - 0.9;
-  const gapA1 = gapA0 + 1.35;
-  mapCtx.beginPath();
-  mapCtx.moveTo(0, 0);
-  mapCtx.arc(0, 0, R * 1.02, gapA0, gapA1);
-  mapCtx.closePath();
-  mapCtx.fillStyle = 'rgba(4, 6, 10, 0.75)';
-  mapCtx.fill();
-
-  // Exposed internal lattice in the incomplete section
-  mapCtx.strokeStyle = 'rgba(120, 130, 140, 0.4)';
-  mapCtx.lineWidth = 0.9 * dpr;
-  for (let i = 0; i < 5; i++) {
-    const a = gapA0 + (i / 4) * (gapA1 - gapA0);
-    mapCtx.beginPath();
-    mapCtx.moveTo(Math.cos(a) * R * 0.35, Math.sin(a) * R * 0.35);
-    mapCtx.lineTo(Math.cos(a) * R * 0.95, Math.sin(a) * R * 0.95);
-    mapCtx.stroke();
-  }
-  // Cross-rings in the gap
-  for (let rFrac of [0.5, 0.7, 0.88]) {
-    mapCtx.beginPath();
-    mapCtx.arc(0, 0, R * rFrac, gapA0, gapA1);
-    mapCtx.stroke();
-  }
-
-  mapCtx.restore(); // end clip
-
-  // Rim highlight
-  mapCtx.beginPath();
-  mapCtx.arc(0, 0, R, 0, Math.PI * 2);
-  mapCtx.strokeStyle = 'rgba(140, 150, 160, 0.35)';
-  mapCtx.lineWidth = 1.2 * dpr;
-  mapCtx.stroke();
-
-  // Subtle specular edge on sunward side
-  mapCtx.beginPath();
-  mapCtx.arc(-R * 0.15, -R * 0.2, R * 0.92, -2.2, -0.6);
-  mapCtx.strokeStyle = 'rgba(200, 210, 220, 0.12)';
-  mapCtx.lineWidth = 2 * dpr;
-  mapCtx.stroke();
-
-  if (!perfMode) {
-    mapCtx.font = `${9 * dpr}px JetBrains Mono, monospace`;
-    mapCtx.fillStyle = 'rgba(150, 160, 175, 0.45)';
-    mapCtx.fillText('DS-II', R * 0.55, R * 1.25);
-  }
-
   mapCtx.restore();
 }
 
@@ -2595,11 +2584,12 @@ function drawMap() {
   mapCtx.clearRect(0, 0, w, h);
 
   drawCelestialBackground(w, h, dpr);
-  drawDeathStar(w, h, dpr);
 
   if (!projection) return;
   if (!paused) mapRotation = (mapRotation + (perfMode ? 0.07 : 0.04)) % 360;
   projection.rotate([-station.lon - mapRotation, -station.lat * 0.3 - 10, 0]);
+  // Solar system in the sky behind Earth (uses updated projection.rotate)
+  drawSolarSystemSky(w, h, dpr);
 
   // ocean disc
   mapCtx.beginPath();
@@ -2655,72 +2645,56 @@ function drawMap() {
   mapCtx.fillRect(0, 0, w, h);
   mapCtx.restore();
 
+  drawAurora(dpr);
+
   // home QTH
   const home = projection([station.lon, station.lat]);
   if (home) {
+    const dprH = canvasPixelRatio();
+    // ON AIR: radiating elliptical waves (perspective on the sphere) + callsign
+    if (onAir) {
+      const t = Date.now() / 1000;
+      const maxR = Math.min(mapCanvas.width, mapCanvas.height) * 0.11;
+      const nRings = perfMode ? 2 : 3;
+      for (let i = 0; i < nRings; i++) {
+        // Very slow: ~1 full expansion cycle every 100 seconds
+        const phase = (t * 0.01 + i / nRings) % 1;
+        const rad = 8 * dprH + phase * maxR;
+        const alpha = (1 - phase) * 0.55;
+        // Flatten Y for a 3D “sitting on the globe” look
+        const ry = rad * 0.42;
+        mapCtx.beginPath();
+        mapCtx.ellipse(home[0], home[1], rad, ry, 0, 0, Math.PI * 2);
+        mapCtx.strokeStyle = `rgba(61, 255, 158, ${alpha})`;
+        mapCtx.lineWidth = (2.2 - phase * 1.2) * dprH;
+        mapCtx.stroke();
+        // secondary cyan rim
+        mapCtx.beginPath();
+        mapCtx.ellipse(home[0], home[1], rad * 0.92, ry * 0.92, 0, 0, Math.PI * 2);
+        mapCtx.strokeStyle = `rgba(62, 230, 255, ${alpha * 0.45})`;
+        mapCtx.lineWidth = 1 * dprH;
+        mapCtx.stroke();
+      }
+      // Callsign label above QTH
+      mapCtx.font = `bold ${13 * dprH}px JetBrains Mono, monospace`;
+      mapCtx.textAlign = 'center';
+      mapCtx.fillStyle = 'rgba(61, 255, 158, 0.95)';
+      mapCtx.shadowColor = 'rgba(61, 255, 158, 0.55)';
+      mapCtx.shadowBlur = 12 * dprH;
+      mapCtx.fillText(station.call || 'ON AIR', home[0], home[1] - 18 * dprH);
+      mapCtx.shadowBlur = 0;
+      mapCtx.textAlign = 'start';
+    }
     mapCtx.beginPath();
     mapCtx.arc(home[0], home[1], 5 * devicePixelRatio, 0, Math.PI * 2);
-    mapCtx.fillStyle = '#ffb627';
+    mapCtx.fillStyle = onAir ? '#3dff9e' : '#ffb627';
     mapCtx.fill();
     mapCtx.beginPath();
     mapCtx.arc(home[0], home[1], 12 * devicePixelRatio, 0, Math.PI * 2);
-    mapCtx.strokeStyle = 'rgba(255,182,39,0.5)';
+    mapCtx.strokeStyle = onAir ? 'rgba(61,255,158,0.55)' : 'rgba(255,182,39,0.5)';
     mapCtx.lineWidth = 1.5 * devicePixelRatio;
     mapCtx.stroke();
   }
-
-  // RAM Manitoba repeaters (front-hemisphere only)
-  const r = projection.rotate();
-  const toRad = Math.PI / 180;
-  const lambda0 = -r[0] * toRad;
-  const phi0 = r[1] * toRad;
-  const cosPhi0 = Math.cos(phi0);
-  const sinPhi0 = Math.sin(phi0);
-  function isFront(lon, lat) {
-    const lambda = lon * toRad - lambda0;
-    const phi = lat * toRad;
-    const cosC = sinPhi0 * Math.sin(phi) + cosPhi0 * Math.cos(phi) * Math.cos(lambda);
-    return cosC > 0.05;
-  }
-  // soft links between nearby RAM sites
-  mapCtx.lineWidth = 1 * devicePixelRatio;
-  for (let i = 0; i < RAM_REPEATERS.length; i++) {
-    for (let j = i + 1; j < RAM_REPEATERS.length; j++) {
-      const a = RAM_REPEATERS[i], b = RAM_REPEATERS[j];
-      const dlat = a.lat - b.lat, dlon = a.lon - b.lon;
-      if (dlat * dlat + dlon * dlon > 1.6) continue; // ~ only local links
-      if (!isFront(a.lon, a.lat) || !isFront(b.lon, b.lat)) continue;
-      const pa = projection([a.lon, a.lat]);
-      const pb = projection([b.lon, b.lat]);
-      if (!pa || !pb) continue;
-      mapCtx.beginPath();
-      mapCtx.moveTo(pa[0], pa[1]);
-      mapCtx.lineTo(pb[0], pb[1]);
-      mapCtx.strokeStyle = 'rgba(196, 245, 66, 0.18)';
-      mapCtx.stroke();
-    }
-  }
-  RAM_REPEATERS.forEach(rep => {
-    if (!isFront(rep.lon, rep.lat)) return;
-    const p = projection([rep.lon, rep.lat]);
-    if (!p) return;
-    const uhf = rep.freq.startsWith('4');
-    mapCtx.beginPath();
-    mapCtx.arc(p[0], p[1], (uhf ? 3.5 : 4.5) * devicePixelRatio, 0, Math.PI * 2);
-    mapCtx.fillStyle = uhf ? '#c4f542' : '#3dff9e';
-    mapCtx.fill();
-    mapCtx.beginPath();
-    mapCtx.arc(p[0], p[1], 8 * devicePixelRatio, 0, Math.PI * 2);
-    mapCtx.strokeStyle = uhf ? 'rgba(196,245,66,0.45)' : 'rgba(61,255,158,0.4)';
-    mapCtx.lineWidth = 1.2 * devicePixelRatio;
-    mapCtx.stroke();
-    // callsign label when globe is somewhat face-on to Manitoba
-    if (isFront(rep.lon, rep.lat)) {
-      mapCtx.font = `${10 * devicePixelRatio}px JetBrains Mono, monospace`;
-      mapCtx.fillStyle = 'rgba(200, 255, 220, 0.9)';
-      mapCtx.fillText(rep.call, p[0] + 7 * devicePixelRatio, p[1] - 4 * devicePixelRatio);
-    }
-  });
 
   // signal arcs / spots
   spots.forEach(s => {
@@ -3380,11 +3354,348 @@ function renderCelestial() {
   }).join('');
 }
 
+/* ─── Solar system + Tesla Roadster (Starman) ─── */
+/* Heliocentric elements: a in AU, period in days, color. Not to scale for outer planets (compressed). */
+/* ─── Solar system in globe background (tracks projection.rotate) ─── */
+const SOLAR_BODIES = [
+  { name: 'Mer', a: 0.387, period: 87.97, color: '#c8c8c8', r: 2.2 },
+  { name: 'Ven', a: 0.723, period: 224.7, color: '#e8cda0', r: 3.0 },
+  { name: 'Ear', a: 1.000, period: 365.25, color: '#4ea8ff', r: 3.2 },
+  { name: 'Mar', a: 1.524, period: 687.0, color: '#e07a5f', r: 2.6 },
+  { name: 'Jup', a: 5.203, period: 4331, color: '#d4a373', r: 5.0 },
+  { name: 'Sat', a: 9.537, period: 10747, color: '#f0d9a0', r: 4.5 },
+  { name: 'Ura', a: 19.19, period: 30689, color: '#7ec8e3', r: 3.5 },
+  { name: 'Nep', a: 30.07, period: 60190, color: '#5b7cfa', r: 3.5 }
+];
+/* NASA/JPL Horizons ID -143205 · solution #11 · peri~0.986 AU aph~1.66 AU · P~557 d */
+const ROADSTER = {
+  name: 'Roadster',
+  a: 1.325,
+  e: 0.2558,
+  period: 557.0,
+  i: 1.077,
+  epoch: Date.UTC(2018, 1, 6, 20, 45),
+  m0: 0.4,
+  jplId: '-143205'
+};
+let roadsterLive = null; // { rAu, earthAu, speedKms, source, updated }
+
+function bodyAnomaly(periodDays, epochMs, nowMs) {
+  const days = (nowMs - (epochMs || Date.UTC(2000, 0, 1))) / 86400000;
+  let a = (2 * Math.PI * (days / periodDays)) % (2 * Math.PI);
+  if (a < 0) a += 2 * Math.PI;
+  return a;
+}
+function roadsterState(now = new Date()) {
+  const days = (now.getTime() - ROADSTER.epoch) / 86400000;
+  let M = (ROADSTER.m0 + 2 * Math.PI * days / ROADSTER.period) % (2 * Math.PI);
+  if (M < 0) M += 2 * Math.PI;
+  const E = solveE(M, ROADSTER.e);
+  const cosE = Math.cos(E), sinE = Math.sin(E);
+  const nu = Math.atan2(Math.sqrt(1 - ROADSTER.e * ROADSTER.e) * sinE, cosE - ROADSTER.e);
+  let r = ROADSTER.a * (1 - ROADSTER.e * cosE);
+  const mu = 1.327e11;
+  const a_km = ROADSTER.a * 1.496e8;
+  let r_km = r * 1.496e8;
+  let v = Math.sqrt(mu * (2 / r_km - 1 / a_km));
+  if (roadsterLive && roadsterLive.rAu) {
+    r = roadsterLive.rAu;
+    r_km = r * 1.496e8;
+    if (roadsterLive.speedKms) v = roadsterLive.speedKms;
+  }
+  const peri = ROADSTER.a * (1 - ROADSTER.e);
+  const aph = ROADSTER.a * (1 + ROADSTER.e);
+  const ageYears = days / 365.25;
+  const orbits = days / ROADSTER.period;
+  const helioLon = (nu * 180 / Math.PI + 30) % 360;
+  const earthAu = roadsterLive && roadsterLive.earthAu != null ? roadsterLive.earthAu : null;
+  return { r, nu, v, peri, aph, ageYears, orbits, M, helioLon, earthAu, days };
+}
+function earthHelioLonDeg(date = new Date()) {
+  const start = Date.UTC(date.getUTCFullYear(), 0, 0);
+  const day = (date.getTime() - start) / 86400000;
+  return (280.147 + 0.9856474 * day) % 360;
+}
+function projectHelioOnSky(helioLonDeg, eclLat, factor) {
+  const earthL = earthHelioLonDeg();
+  let elong = ((helioLonDeg - earthL) % 360 + 360) % 360;
+  if (elong > 180) elong -= 360;
+  const sunSkyLon = (earthL + 180) % 360;
+  let skyLon = (sunSkyLon + elong + 360) % 360;
+  if (skyLon > 180) skyLon -= 360;
+  const skyLat = eclLat + 23.4 * Math.sin(skyLon * Math.PI / 180) * 0.15;
+  return projectAlt(skyLon, skyLat, factor);
+}
+
+async function fetchWhereIsRoadster() {
+  // Primary source: whereisroadster.com (client-rendered text; proxy for CORS)
+  const pageUrl = 'https://www.whereisroadster.com/';
+  const proxies = [
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent(pageUrl),
+    'https://corsproxy.io/?' + encodeURIComponent(pageUrl)
+  ];
+  for (const url of proxies) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const text = await res.text();
+      // Parse live stats from page prose
+      const earth = text.match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU[^]*?from Earth[^]*?(toward|away from) Earth[^]*?([\d,]+)\s*km\/h,\s*([\d.]+)\s*km\/s/i)
+        || text.match(/from Earth[^]*?([\d,]+)\s*km,\s*([\d.]+)\s*AU[^]*?(toward|away from) Earth[^]*?([\d.]+)\s*km\/s/i);
+      const mars = text.match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU[^]*?from Mars[^]*?(toward|away from)[^]*?([\d.]+)\s*km\/s/i);
+      const sun = text.match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU[^]*?from the Sun[^]*?(toward|away from)[^]*?([\d.]+)\s*km\/s/i)
+        || text.match(/from the Sun[^]*?([\d,]+)\s*km,\s*([\d.]+)\s*AU[^]*?(toward|away from)[^]*?([\d.]+)\s*km\/s/i);
+      const orbits = text.match(/completed about\s*([\d.]+)\s*orbits/i);
+      const period = text.match(/orbital period is about\s*([\d.]+)\s*days/i);
+      const light = text.match(/([\d.]+)\s*light\s*minutes\)\s*from Earth/i)
+        || text.match(/from Earth[^]*?([\d.]+)\s*light\s*minutes/i);
+      // Flexible parse for Earth block
+      let earthAu = null, earthKm = null, earthKms = null, earthDir = null;
+      let marsAu = null, marsKm = null, marsKms = null, marsDir = null;
+      let sunAu = null, sunKm = null, sunKms = null, sunDir = null;
+
+      const eBlock = text.match(/from Earth[,\s]+moving (toward|away from) Earth at a speed of[\s\S]{0,80}?([\d,.]+)\s*km\/h,\s*([\d.]+)\s*km\/s/i);
+      const eDist = text.match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU,\s*([\d.]+)\s*light\s*minutes\)\s*from Earth/i)
+        || text.match(/is\s+([\d,]+)\s*miles\s*\(\s*([\d,]+)\s*km,\s*([\d.]+)\s*AU,\s*([\d.]+)\s*light\s*minutes\)\s*from Earth/i);
+      if (eDist) {
+        // groups may vary
+        const nums = eDist[0].match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU,\s*([\d.]+)\s*light/);
+        if (nums) {
+          earthKm = parseFloat(nums[1].replace(/,/g, ''));
+          earthAu = parseFloat(nums[2]);
+        }
+      }
+      if (eBlock) {
+        earthDir = eBlock[1].toLowerCase().includes('toward') ? 'toward' : 'away';
+        earthKms = parseFloat(eBlock[3]);
+      }
+      const mDist = text.match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU,\s*([\d.]+)\s*light\s*minutes\)\s*from Mars/i);
+      const mBlock = text.match(/from Mars,\s*moving (toward|away from)[^]*?([\d.]+)\s*km\/s/i);
+      if (mDist) {
+        const nums = mDist[0].match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU/);
+        if (nums) { marsKm = parseFloat(nums[1].replace(/,/g, '')); marsAu = parseFloat(nums[2]); }
+      }
+      if (mBlock) {
+        marsDir = mBlock[1].toLowerCase().includes('toward') ? 'toward' : 'away';
+        marsKms = parseFloat(mBlock[2]);
+      }
+      const sDist = text.match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU,\s*([\d.]+)\s*light\s*minutes\)\s*from the Sun/i);
+      const sBlock = text.match(/from the Sun,\s*moving (toward|away from)[^]*?([\d.]+)\s*km\/s/i);
+      if (sDist) {
+        const nums = sDist[0].match(/([\d,]+)\s*km,\s*([\d.]+)\s*AU/);
+        if (nums) { sunKm = parseFloat(nums[1].replace(/,/g, '')); sunAu = parseFloat(nums[2]); }
+      }
+      if (sBlock) {
+        sunDir = sBlock[1].toLowerCase().includes('toward') ? 'toward' : 'away';
+        sunKms = parseFloat(sBlock[2]);
+      }
+
+      if (sunAu || earthAu) {
+        roadsterLive = {
+          rAu: sunAu || (roadsterLive && roadsterLive.rAu) || null,
+          earthAu: earthAu,
+          earthKm: earthKm,
+          earthKms: earthKms,
+          earthDir: earthDir,
+          marsAu: marsAu,
+          marsKm: marsKm,
+          marsKms: marsKms,
+          marsDir: marsDir,
+          speedKms: sunKms || earthKms || null,
+          sunDir: sunDir,
+          orbits: orbits ? parseFloat(orbits[1]) : null,
+          periodDays: period ? parseFloat(period[1]) : 557,
+          lightMin: light ? parseFloat(light[1]) : (earthKm ? earthKm / 299792.458 / 60 : null),
+          source: 'whereisroadster.com',
+          updated: Date.now()
+        };
+        updateRoadsterHud();
+        return true;
+      }
+    } catch (e) { /* try next */ }
+  }
+  return false;
+}
+
+async function fetchRoadsterJpl() {
+  // Prefer whereisroadster.com live numbers; fall back to NASA/JPL Horizons -143205
+  const ok = await fetchWhereIsRoadster();
+  if (ok) return;
+  const day = new Date().toISOString().slice(0, 10);
+  const next = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const q = new URLSearchParams({
+    format: 'text',
+    COMMAND: "'-143205'",
+    MAKE_EPHEM: 'YES',
+    EPHEM_TYPE: 'VECTORS',
+    CENTER: "'500@10'",
+    START_TIME: "'" + day + "'",
+    STOP_TIME: "'" + next + "'",
+    STEP_SIZE: "'1 d'",
+    OUT_UNITS: 'AU-D'
+  });
+  const primary = 'https://ssd.jpl.nasa.gov/api/horizons.api?' + q.toString();
+  const urls = [
+    primary,
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent(primary)
+  ];
+  for (const url of urls) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const text = await res.text();
+      const m = text.match(/X =\s*([-\d.E+]+)\s*Y =\s*([-\d.E+]+)\s*Z =\s*([-\d.E+]+)\s*[\s\S]*?VX=\s*([-\d.E+]+)\s*VY=\s*([-\d.E+]+)\s*VZ=\s*([-\d.E+]+)\s*[\s\S]*?RG=\s*([-\d.E+]+)/i);
+      if (!m) continue;
+      const VX = parseFloat(m[4]), VY = parseFloat(m[5]), VZ = parseFloat(m[6]);
+      const RG = parseFloat(m[7]);
+      const speedAuD = Math.sqrt(VX*VX + VY*VY + VZ*VZ);
+      const speedKms = speedAuD * 149597870.7 / 86400;
+      roadsterLive = Object.assign({}, roadsterLive || {}, {
+        rAu: RG,
+        speedKms,
+        source: 'NASA/JPL Horizons · -143205 (fallback)',
+        updated: Date.now()
+      });
+      updateRoadsterHud();
+      return;
+    } catch (e) {}
+  }
+  updateRoadsterHud();
+}
+
+function updateRoadsterHud() {
+  const el = document.getElementById('roadsterHudBody');
+  if (!el) return;
+  const rs = roadsterState();
+  const L = roadsterLive || {};
+  const rAu = L.rAu != null ? L.rAu : rs.r;
+  const v = L.speedKms != null ? L.speedKms : rs.v;
+  const earthAu = L.earthAu != null ? L.earthAu : rs.earthAu;
+  const earthKm = L.earthKm != null ? L.earthKm : (earthAu != null ? earthAu * 149597870.7 : null);
+  const sunKm = rAu * 149597870.7;
+  const lightMin = L.lightMin != null ? L.lightMin : (earthKm != null ? earthKm / 299792.458 / 60 : null);
+  const dir = (d) => d === 'toward' ? '↓ toward' : d === 'away' ? '↑ away' : '';
+  el.innerHTML =
+    `<div>Sun <strong>${rAu.toFixed(3)} AU</strong> · <strong>${(sunKm/1e6).toFixed(1)} M km</strong>` +
+    (L.sunDir ? ` <span style="color:var(--faint)">${dir(L.sunDir)}</span>` : '') + `</div>` +
+    (earthKm != null
+      ? `<div>Earth <strong>${(earthAu != null ? earthAu : earthKm/149597870.7).toFixed(3)} AU</strong> · <strong>${(earthKm/1e6).toFixed(1)} M km</strong>` +
+        (L.earthDir ? ` <span style="color:var(--faint)">${dir(L.earthDir)}</span>` : '') +
+        (L.earthKms != null ? ` · <strong>${L.earthKms.toFixed(2)} km/s</strong>` : '') + `</div>`
+      : `<div>Earth <strong>—</strong></div>`) +
+    (L.marsAu != null
+      ? `<div>Mars <strong>${L.marsAu.toFixed(3)} AU</strong> · <strong>${((L.marsKm||L.marsAu*149597870.7)/1e6).toFixed(1)} M km</strong>` +
+        (L.marsDir ? ` <span style="color:var(--faint)">${dir(L.marsDir)}</span>` : '') + `</div>`
+      : '') +
+    `<div>Speed (Sun) <strong>${v.toFixed(2)} km/s</strong> · <strong>${(v*3600).toFixed(0)} km/h</strong></div>` +
+    (lightMin != null ? `<div>Light-time <strong>${lightMin.toFixed(2)} min</strong></div>` : '') +
+    `<div>Orbit <strong>${rs.peri.toFixed(3)}–${rs.aph.toFixed(3)} AU</strong> · P <strong>${(L.periodDays||ROADSTER.period).toFixed(0)} d</strong></div>` +
+    `<div>Laps <strong>${(L.orbits != null ? L.orbits : rs.orbits).toFixed(2)}</strong> · in space <strong>${rs.ageYears.toFixed(2)} yr</strong></div>` +
+    `<div>Launch <strong>2018-02-06</strong> Falcon Heavy · Starman</div>` +
+    `<div style="margin-top:3px;color:var(--faint);font-size:9px;">Source: <a href="https://www.whereisroadster.com/" target="_blank" rel="noopener" style="color:var(--cyan);pointer-events:auto;">whereisroadster.com</a>` +
+    (L.source && L.source.indexOf('JPL') >= 0 ? ' · JPL fallback' : '') + `</div>`;
+}
+
+
+function drawSolarSystemSky(w, h, dpr) {
+  if (!projection) return;
+  const now = new Date();
+  const earthL = earthHelioLonDeg(now);
+  const sunSkyLon = ((earthL + 180) % 360);
+  const sunLon = sunSkyLon > 180 ? sunSkyLon - 360 : sunSkyLon;
+
+  if (!perfMode) {
+    const eclPts = [];
+    for (let lon = -180; lon <= 180; lon += 6) {
+      const lat = 23.4 * Math.sin(lon * Math.PI / 180) * 0.2;
+      eclPts.push(projectAlt(lon, lat, 1.55));
+    }
+    skyStroke(eclPts, 'rgba(255, 210, 120, 0.12)', 1.0);
+  }
+
+  const sunP = projectAlt(sunLon, 5, 1.62);
+  if (sunP) {
+    const R = 10 * dpr;
+    const g = mapCtx.createRadialGradient(sunP[0], sunP[1], 0, sunP[0], sunP[1], R * 3);
+    g.addColorStop(0, 'rgba(255, 244, 180, 0.95)');
+    g.addColorStop(0.25, 'rgba(255, 200, 60, 0.55)');
+    g.addColorStop(1, 'rgba(255, 140, 40, 0)');
+    mapCtx.fillStyle = g;
+    mapCtx.beginPath();
+    mapCtx.arc(sunP[0], sunP[1], R * 3, 0, Math.PI * 2);
+    mapCtx.fill();
+    mapCtx.beginPath();
+    mapCtx.arc(sunP[0], sunP[1], R, 0, Math.PI * 2);
+    mapCtx.fillStyle = '#ffe566';
+    mapCtx.fill();
+    if (!perfMode) {
+      mapCtx.font = `bold ${10 * dpr}px JetBrains Mono, monospace`;
+      mapCtx.fillStyle = 'rgba(255, 220, 120, 0.75)';
+      mapCtx.fillText('Sun', sunP[0] + R + 4 * dpr, sunP[1] - 2 * dpr);
+    }
+  }
+
+  const tMs = now.getTime();
+  SOLAR_BODIES.forEach(b => {
+    if (b.name === 'Ear') return;
+    const ang = bodyAnomaly(b.period, Date.UTC(2000, 0, 1), tMs);
+    const helioLon = (ang * 180 / Math.PI) % 360;
+    const fac = 1.48 + Math.min(0.35, Math.log10(b.a + 1) * 0.25);
+    const p = projectHelioOnSky(helioLon, 0, fac);
+    if (!p) return;
+    mapCtx.beginPath();
+    mapCtx.arc(p[0], p[1], b.r * dpr * 0.85, 0, Math.PI * 2);
+    mapCtx.fillStyle = b.color;
+    mapCtx.fill();
+    if (!perfMode) {
+      mapCtx.font = `${9 * dpr}px JetBrains Mono, monospace`;
+      mapCtx.fillStyle = 'rgba(200, 210, 230, 0.65)';
+      mapCtx.fillText(b.name, p[0] + 5 * dpr, p[1] - 2 * dpr);
+    }
+  });
+
+  const rs = roadsterState(now);
+  const rp = projectHelioOnSky(rs.helioLon, ROADSTER.i * Math.sin(rs.nu), 1.52);
+  if (rp) {
+    mapCtx.beginPath();
+    mapCtx.arc(rp[0], rp[1], 3.5 * dpr, 0, Math.PI * 2);
+    mapCtx.fillStyle = '#ff4a4a';
+    mapCtx.fill();
+    mapCtx.beginPath();
+    mapCtx.arc(rp[0], rp[1], 7 * dpr, 0, Math.PI * 2);
+    mapCtx.strokeStyle = 'rgba(255, 90, 90, 0.55)';
+    mapCtx.lineWidth = 1.2 * dpr;
+    mapCtx.stroke();
+    if (!perfMode) {
+      mapCtx.font = `bold ${9 * dpr}px JetBrains Mono, monospace`;
+      mapCtx.fillStyle = 'rgba(255, 150, 130, 0.9)';
+      mapCtx.fillText('Roadster', rp[0] + 8 * dpr, rp[1] - 4 * dpr);
+      mapCtx.font = `${8 * dpr}px JetBrains Mono, monospace`;
+      mapCtx.fillStyle = 'rgba(255, 160, 140, 0.65)';
+      mapCtx.fillText(rs.r.toFixed(2) + ' AU · ' + rs.v.toFixed(1) + ' km/s', rp[0] + 8 * dpr, rp[1] + 8 * dpr);
+    }
+  }
+  if (!perfMode) {
+    const pathPts = [];
+    for (let i = 0; i <= 48; i++) {
+      const nu = (i / 48) * Math.PI * 2;
+      const r = ROADSTER.a * (1 - ROADSTER.e * ROADSTER.e) / (1 + ROADSTER.e * Math.cos(nu));
+      const helioLon = (nu * 180 / Math.PI + 30) % 360;
+      pathPts.push(projectHelioOnSky(helioLon, ROADSTER.i * Math.sin(nu) * 0.5, 1.5 + (r - 1) * 0.05));
+    }
+    skyStroke(pathPts, 'rgba(255, 80, 80, 0.22)', 1.0);
+  }
+}
+
 function boot() {
   applyPerfMode();
   applyStation();
   if (!localStorage.getItem('hmc_station')) openSetup();
   else closeSetup();
+
+  fetchRoadsterJpl();
+  setInterval(fetchRoadsterJpl, 30 * 60 * 1000);
+  setInterval(updateRoadsterHud, 5000);
 
   initWxCityPicker();
   initCountdown();
