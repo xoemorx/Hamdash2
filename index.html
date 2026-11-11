@@ -1035,7 +1035,7 @@ body.perfMode #mapCanvas { opacity: 0.9; }
   </div>
 
   <div id="radarPanel">
-    <div class="radarLabel">Azimuth · <span id="radarCall">—</span> · <span id="radarGrid">—</span></div>
+    <div class="radarLabel">Azimuthal map · <span id="radarCall">—</span> · <span id="radarGrid">—</span></div>
     <canvas id="radarCanvas" width="560" height="560"></canvas>
   </div>
 
@@ -3152,112 +3152,173 @@ function hexAlpha(hex, a) {
 const radarCanvas = document.getElementById('radarCanvas');
 const radarCtx = radarCanvas.getContext('2d');
 
+function radarCenter() {
+  // Station QTH; if missing/invalid, Winnipeg, MB
+  const lat = parseFloat(station && station.lat);
+  const lon = parseFloat(station && station.lon);
+  if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+    return { lat, lon };
+  }
+  return { lat: 49.8951, lon: -97.1384 }; // Winnipeg, MB
+}
+
 function drawRadar() {
   const w = radarCanvas.width, h = radarCanvas.height;
-  const cx = w / 2, cy = h / 2, r = w * 0.42;
+  const cx = w / 2, cy = h / 2;
+  const pad = 28;
+  const r = Math.min(w, h) / 2 - pad;
   radarCtx.clearRect(0, 0, w, h);
 
-  // range rings — 5 / 10 / 15 / 20 Mm (matches blip scale of 20,000 km)
-  radarCtx.strokeStyle = 'rgba(62, 230, 255, 0.2)';
+  const { lat: clat, lon: clon } = radarCenter();
+
+  // Azimuthal equidistant: true bearings + distance from QTH; antipode at rim
+  const azProj = d3.geoAzimuthalEquidistant()
+    .rotate([-clon, -clat])
+    .translate([cx, cy])
+    .scale(r / Math.PI)
+    .clipAngle(180)
+    .precision(1);
+  const azPath = d3.geoPath(azProj, radarCtx);
+
+  // Ocean disc (full sphere)
+  radarCtx.beginPath();
+  azPath({ type: 'Sphere' });
+  radarCtx.fillStyle = '#061a30';
+  radarCtx.fill();
+  radarCtx.strokeStyle = 'rgba(120, 180, 220, 0.35)';
   radarCtx.lineWidth = 1.5;
-  for (let i = 1; i <= 4; i++) {
+  radarCtx.stroke();
+
+  // Land
+  if (land) {
     radarCtx.beginPath();
-    radarCtx.arc(cx, cy, r * (i / 4), 0, Math.PI * 2);
+    azPath(land);
+    radarCtx.fillStyle = 'rgba(45, 95, 75, 0.92)';
+    radarCtx.fill();
+    radarCtx.strokeStyle = 'rgba(140, 200, 170, 0.25)';
+    radarCtx.lineWidth = 0.6;
     radarCtx.stroke();
   }
-  // range labels
-  radarCtx.fillStyle = 'rgba(62, 230, 255, 0.4)';
-  radarCtx.font = '600 12px JetBrains Mono';
-  radarCtx.textAlign = 'left';
-  for (let i = 1; i <= 4; i++) {
-    radarCtx.fillText((i * 5) + 'k', cx + 4, cy - r * (i / 4) + 4);
+
+  // Countries (subtle)
+  if (typeof countries !== 'undefined' && countries) {
+    radarCtx.beginPath();
+    azPath(countries);
+    radarCtx.strokeStyle = 'rgba(160, 210, 190, 0.12)';
+    radarCtx.lineWidth = 0.4;
+    radarCtx.stroke();
   }
 
-  // degree ticks every 10°, thicker every 30°
+  // Graticule
+  radarCtx.beginPath();
+  azPath(d3.geoGraticule().step([30, 30])());
+  radarCtx.strokeStyle = 'rgba(100, 160, 210, 0.14)';
+  radarCtx.lineWidth = 0.7;
+  radarCtx.stroke();
+
+  // Distance rings — concentric in this projection (km via Earth radius)
+  // scale: angular distance δ (rad) maps to pixel = scale * δ; full π → r
+  // ring at D km: δ = D / 6371, pixelRadius = (r/π) * δ
+  const RE = 6371;
+  radarCtx.font = '600 11px JetBrains Mono';
+  radarCtx.textAlign = 'left';
+  radarCtx.textBaseline = 'bottom';
+  [5000, 10000, 15000, 20000].forEach((km, idx) => {
+    const pr = (r / Math.PI) * (km / RE);
+    if (pr > r * 0.98) return;
+    radarCtx.beginPath();
+    radarCtx.arc(cx, cy, pr, 0, Math.PI * 2);
+    radarCtx.strokeStyle = 'rgba(62, 230, 255, 0.22)';
+    radarCtx.lineWidth = 1.2;
+    radarCtx.stroke();
+    radarCtx.fillStyle = 'rgba(62, 230, 255, 0.4)';
+    radarCtx.fillText((km / 1000) + 'k km', cx + 3, cy - pr + 1);
+  });
+
+  // Degree / bearing ticks on outer rim (true north up)
   for (let deg = 0; deg < 360; deg += 10) {
     const a = (deg - 90) * Math.PI / 180;
     const major = deg % 30 === 0;
-    const r0 = major ? r * 0.88 : r * 0.93;
-    const r1 = r;
+    const r0 = major ? r * 0.94 : r * 0.97;
     radarCtx.beginPath();
     radarCtx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
-    radarCtx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
-    radarCtx.strokeStyle = major ? 'rgba(62, 230, 255, 0.45)' : 'rgba(62, 230, 255, 0.18)';
+    radarCtx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+    radarCtx.strokeStyle = major ? 'rgba(62, 230, 255, 0.5)' : 'rgba(62, 230, 255, 0.2)';
     radarCtx.lineWidth = major ? 2 : 1;
     radarCtx.stroke();
   }
-  // crosshair
-  radarCtx.strokeStyle = 'rgba(62, 230, 255, 0.22)';
-  radarCtx.lineWidth = 1.2;
-  radarCtx.beginPath();
-  radarCtx.moveTo(cx - r, cy); radarCtx.lineTo(cx + r, cy);
-  radarCtx.moveTo(cx, cy - r); radarCtx.lineTo(cx, cy + r);
-  radarCtx.stroke();
 
-  // Cardinal labels — true north up (bearing 0° at top)
-  radarCtx.font = '700 20px JetBrains Mono';
+  // Cardinal labels
+  radarCtx.font = '700 16px JetBrains Mono';
   radarCtx.textAlign = 'center';
   radarCtx.textBaseline = 'middle';
-  const card = [
-    [0, 'N', 'rgba(255, 120, 120, 0.9)'],
-    [90, 'E', 'rgba(62, 230, 255, 0.75)'],
-    [180, 'S', 'rgba(62, 230, 255, 0.75)'],
-    [270, 'W', 'rgba(62, 230, 255, 0.75)']
-  ];
-  card.forEach(([deg, lab, col]) => {
+  [[0, 'N', 'rgba(255, 120, 120, 0.95)'],
+   [90, 'E', 'rgba(62, 230, 255, 0.8)'],
+   [180, 'S', 'rgba(62, 230, 255, 0.8)'],
+   [270, 'W', 'rgba(62, 230, 255, 0.8)']].forEach(([deg, lab, col]) => {
     const a = (deg - 90) * Math.PI / 180;
-    const x = cx + Math.cos(a) * (r + 22);
-    const y = cy + Math.sin(a) * (r + 22);
     radarCtx.fillStyle = col;
-    radarCtx.fillText(lab, x, y);
+    radarCtx.fillText(lab, cx + Math.cos(a) * (r + 14), cy + Math.sin(a) * (r + 14));
   });
-  // degree numbers at 30° intervals
-  radarCtx.font = '600 11px JetBrains Mono';
+  radarCtx.font = '600 10px JetBrains Mono';
   radarCtx.fillStyle = 'rgba(180, 210, 230, 0.45)';
   for (let deg = 0; deg < 360; deg += 30) {
     if (deg % 90 === 0) continue;
     const a = (deg - 90) * Math.PI / 180;
-    const x = cx + Math.cos(a) * (r + 18);
-    const y = cy + Math.sin(a) * (r + 18);
-    radarCtx.fillText(String(deg), x, y);
+    radarCtx.fillText(String(deg), cx + Math.cos(a) * (r + 12), cy + Math.sin(a) * (r + 12));
   }
 
-  // sweep
-  const angle = (Date.now() / 30) % 360;
+  // Soft sweep (optional visual)
+  const angle = (Date.now() / 40) % 360;
   const rad = (angle - 90) * Math.PI / 180;
   const grad = radarCtx.createConicGradient(rad, cx, cy);
-  grad.addColorStop(0, 'rgba(62, 230, 255, 0.28)');
-  grad.addColorStop(0.08, 'rgba(62, 230, 255, 0)');
+  grad.addColorStop(0, 'rgba(62, 230, 255, 0.12)');
+  grad.addColorStop(0.06, 'rgba(62, 230, 255, 0)');
   grad.addColorStop(1, 'rgba(62, 230, 255, 0)');
+  radarCtx.save();
+  radarCtx.beginPath();
+  radarCtx.arc(cx, cy, r, 0, Math.PI * 2);
+  radarCtx.clip();
   radarCtx.beginPath();
   radarCtx.arc(cx, cy, r, 0, Math.PI * 2);
   radarCtx.fillStyle = grad;
   radarCtx.fill();
+  radarCtx.restore();
 
-  // blips — bearing from QTH, range 0–20,000 km
-  spots.slice(0, 30).forEach(s => {
-    const brg = bearing(station.lat, station.lon, s.lat, s.lon);
-    const dist = Math.min(1, haversine(station.lat, station.lon, s.lat, s.lon) / 20000);
-    const a = (brg - 90) * Math.PI / 180;
-    const x = cx + Math.cos(a) * r * dist;
-    const y = cy + Math.sin(a) * r * dist;
-    const alpha = Math.max(0.25, 1 - s.age / 180);
-    radarCtx.beginPath();
-    radarCtx.arc(x, y, 5, 0, Math.PI * 2);
-    radarCtx.fillStyle = hexAlpha(BAND_COLORS[s.band] || '#3ee6ff', alpha);
-    radarCtx.fill();
-  });
+  // DX / activity spots projected on azimuthal map
+  if (typeof spots !== 'undefined' && spots.length) {
+    spots.slice(0, 40).forEach(s => {
+      const pt = azProj([s.lon, s.lat]);
+      if (!pt) return;
+      // clip to disc
+      const dx = pt[0] - cx, dy = pt[1] - cy;
+      if (dx * dx + dy * dy > r * r) return;
+      const alpha = Math.max(0.25, 1 - (s.age || 0) / 180);
+      radarCtx.beginPath();
+      radarCtx.arc(pt[0], pt[1], 4, 0, Math.PI * 2);
+      radarCtx.fillStyle = hexAlpha((typeof BAND_COLORS !== 'undefined' && BAND_COLORS[s.band]) || '#3ee6ff', alpha);
+      radarCtx.fill();
+    });
+  }
 
-  // center QTH
+  // Center = station QTH
   radarCtx.beginPath();
-  radarCtx.arc(cx, cy, 6, 0, Math.PI * 2);
+  radarCtx.arc(cx, cy, 5, 0, Math.PI * 2);
   radarCtx.fillStyle = '#ffb627';
   radarCtx.fill();
   radarCtx.beginPath();
-  radarCtx.arc(cx, cy, 12, 0, Math.PI * 2);
-  radarCtx.strokeStyle = 'rgba(255, 182, 39, 0.45)';
+  radarCtx.arc(cx, cy, 11, 0, Math.PI * 2);
+  radarCtx.strokeStyle = 'rgba(255, 182, 39, 0.5)';
   radarCtx.lineWidth = 1.5;
   radarCtx.stroke();
+
+  // Center caption
+  radarCtx.font = '600 10px JetBrains Mono';
+  radarCtx.fillStyle = 'rgba(255, 200, 100, 0.7)';
+  radarCtx.textAlign = 'center';
+  radarCtx.textBaseline = 'top';
+  const tag = (station && station.grid) ? station.grid : 'Winnipeg';
+  radarCtx.fillText(tag, cx, cy + 14);
 }
 
 function bearing(lat1, lon1, lat2, lon2) {
